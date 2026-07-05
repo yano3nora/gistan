@@ -2,40 +2,8 @@ import { assertEquals } from "@std/assert";
 import { join } from "@std/path";
 import { loadConfig } from "../core/config.ts";
 import { EXIT_COMMAND_NOT_FOUND, type Runner } from "../core/proc.ts";
+import { memoryContext } from "../testing.ts";
 import { run } from "./init.ts";
-import type { CommandContext } from "./types.ts";
-
-function memoryContext(runner: Runner, home: string) {
-  let stdout = "";
-  let stderr = "";
-  const decoder = new TextDecoder();
-  const context: CommandContext = {
-    stdout: {
-      write(chunk: Uint8Array): Promise<number> {
-        stdout += decoder.decode(chunk, { stream: true });
-        return Promise.resolve(chunk.byteLength);
-      },
-    },
-    stderr: {
-      write(chunk: Uint8Array): Promise<number> {
-        stderr += decoder.decode(chunk, { stream: true });
-        return Promise.resolve(chunk.byteLength);
-      },
-    },
-    runner,
-    configPath: join(home, "config.toml"),
-    home,
-  };
-  return {
-    context,
-    get stdout() {
-      return stdout;
-    },
-    get stderr() {
-      return stderr;
-    },
-  };
-}
 
 const ok = { code: 0, stdout: "", stderr: "" };
 

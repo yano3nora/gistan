@@ -23,9 +23,9 @@ SPEC-0001 の v1 コマンドが動作し、日常利用を開始できる。
 - [x] Deno プロジェクト scaffold (`deno.json`, fmt / lint / test 設定, `src/` 構成, README 更新) — 260705 codex exec + 手直し (DENO_DIR 除去, import map 整理)
 - [x] config (`~/.config/gistan/config.toml`) の読み書きと外部 CLI (gh / git / rg / fzf) の存在検査 — 260705 `src/core/{config,deps,proc}.ts`
 - [x] `gistan init` — gh auth 確認 / repo 作成 or clone / 雛形 (`snippets/` `stars/` `.gistan/` `.gitignore`) 配置 — 260705 実 repo 作成の E2E は import 検証時に実施
-- [ ] index (`.gistan/state.json`) の読み書きモジュール (key ソート済み書き出し)
-- [ ] 照合エンジン (index・local・remote の三者照合) — v1 では status が使う最小版
-- [ ] `gistan status` — 未公開 / 公開中 / local drift / remote drift / conflict の判定・表示
+- [x] index (`.gistan/state.json`) の読み書きモジュール (key ソート済み書き出し) — 260705 `src/core/state.ts`
+- [x] 照合エンジン (index・local・remote の三者照合) — 260705 `src/core/reconcile.ts` 純関数として実装
+- [x] `gistan status` — 未公開 / 公開中 / local drift / remote drift / conflict の判定・表示 — 260705 remote 到達不可時は local-only 判定に degrade
 - [ ] `gistan publish` — 新規作成 / 冪等更新 / description 自動生成 / URL クリップボード / 可視性変更時の警告付き再作成
 - [ ] `gistan search` — rg + fzf ライブ全文検索 (snippets + stars)
 - [ ] `gistan import` — paging / multi-file gist のディレクトリ保持 / description からの tags 逆輸入 / gitleaks スキャン (検出時 commit ブロック)
@@ -35,7 +35,7 @@ SPEC-0001 の v1 コマンドが動作し、日常利用を開始できる。
 
 - [x] `init`: gh 未認証時に案内して終了する / 2 回実行しても冪等 — unit test 済 + 実環境 smoke (非 git dir 拒否・依存警告) 確認済
 - [ ] `publish`: 新規 → gist 作成 + index 記録 / 再実行 → 冪等更新 / `--secret` 切替 → URL 変更の警告と確認を挟む
-- [ ] `status`: 未公開・公開中・local drift・remote drift をそれぞれ正しく判定する
+- [x] `status`: 未公開・公開中・local drift・remote drift をそれぞれ正しく判定する — reconcile の判定マトリクス + status の unit test で網羅、実 753 gists で一覧取得 smoke 済
 - [ ] `import`: secret 検出時に commit がブロックされる / multi-file gist が `snippets/<slug>/` で保持される / tags が逆輸入される
 - [ ] 直接 rm / mv されたファイルがあっても各コマンドがクラッシュせず動作する (Invariants)
 
