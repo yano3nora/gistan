@@ -22,6 +22,7 @@ function memoryContext() {
     runner: () => Promise.resolve({ code: 0, stdout: "", stderr: "" }),
     configPath: "/nonexistent/gistan-test/config.toml",
     home: "/nonexistent/gistan-test",
+    confirm: () => Promise.resolve(true),
   };
 
   return {

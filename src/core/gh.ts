@@ -36,3 +36,70 @@ export async function listOwnGists(runner: Runner): Promise<Map<string, RemoteGi
 export function gistUrl(id: string): string {
   return `https://gist.github.com/${id}`;
 }
+
+export interface GistFile {
+  readonly filename: string;
+  readonly content: string;
+}
+
+/**
+ * Bodies go through stdin (`--input -`) instead of CLI args so large snippet
+ * contents never hit the OS argument-length limit.
+ */
+export async function createGist(
+  runner: Runner,
+  options: { description: string; public: boolean; file: GistFile },
+): Promise<{ id: string; updated_at: string }> {
+  const body = JSON.stringify({
+    description: options.description,
+    public: options.public,
+    files: { [options.file.filename]: { content: options.file.content } },
+  });
+  const result = await runner("gh", [
+    "api",
+    "gists",
+    "--method",
+    "POST",
+    "--input",
+    "-",
+    "--jq",
+    "[.id, .updated_at] | @tsv",
+  ], { stdin: body });
+  if (result.code !== 0) {
+    throw new Error(`gist create failed: ${result.stderr.trim() || `exit ${result.code}`}`);
+  }
+  const [id, updated_at] = result.stdout.trim().split("\t");
+  return { id, updated_at };
+}
+
+export async function updateGist(
+  runner: Runner,
+  id: string,
+  options: { description?: string; file: GistFile },
+): Promise<{ updated_at: string }> {
+  const body = JSON.stringify({
+    ...(options.description === undefined ? {} : { description: options.description }),
+    files: { [options.file.filename]: { content: options.file.content } },
+  });
+  const result = await runner("gh", [
+    "api",
+    `gists/${id}`,
+    "--method",
+    "PATCH",
+    "--input",
+    "-",
+    "--jq",
+    ".updated_at",
+  ], { stdin: body });
+  if (result.code !== 0) {
+    throw new Error(`gist update failed: ${result.stderr.trim() || `exit ${result.code}`}`);
+  }
+  return { updated_at: result.stdout.trim() };
+}
+
+export async function deleteGist(runner: Runner, id: string): Promise<void> {
+  const result = await runner("gh", ["api", `gists/${id}`, "--method", "DELETE"]);
+  if (result.code !== 0) {
+    throw new Error(`gist delete failed: ${result.stderr.trim() || `exit ${result.code}`}`);
+  }
+}

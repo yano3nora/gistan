@@ -72,10 +72,11 @@ gist 向け snippets を集約する markdown repo (= gist repo) の構成・運
 - `list [--tag <t>] [--published | --local | --stars]`: 一覧表示。published なら gist URL・可視性も表示
 - これらは糖衣であり、`cd $(gistan root)` して直接 rg / vim を使う操作を常に許容する
 
-### 公開: `gistan publish <path> [--secret] [--description <text>]`
+### 公開: `gistan publish <path> [--secret|--public] [--description <text>]`
 
-- 未 publish なら gist を新規作成し、gist ID・可視性・content hash・remote `updated_at` を index に記録
-- publish 済みなら gist を更新 (冪等)
+- 未 publish なら gist を新規作成し、gist ID・可視性・content hash・remote `updated_at` を index に記録。可視性フラグ省略時の新規作成は public
+- publish 済みなら gist を更新 (冪等)。内容が未変更なら API を呼ばず URL 表示・コピーのみ行う
+- publish 済みに対して可視性フラグを省略した場合は**現状維持** (更新操作が暗黙に可視性を変えてはならない)
 - gist の description は `[tag1][tag2]: <filename>` 形式で tags から自動生成 (既存 gist の命名慣習を踏襲)
 - 成功時に gist URL を標準出力 + クリップボードへコピー
 - **可視性の変更 (public ⇔ secret) は gist API 非対応のため delete + 再作成となる。URL が変わることを警告し確認を取る**
@@ -155,7 +156,7 @@ gistan new [--tags <t1,t2>] <filename>        # snippet 作成
 gistan search [query]                         # rg + fzf ライブ全文検索 (stars 含む)
 gistan edit [query]                           # fuzzy 選択して $EDITOR
 gistan list [--tag <t>] [--published|--local|--stars]
-gistan publish <path> [--secret] [--description <text>]
+gistan publish <path> [--secret|--public] [--description <text>]
 gistan unpublish <path>
 gistan pull [path] [--stars]
 gistan status [path]

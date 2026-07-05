@@ -6,6 +6,8 @@ export interface RunResult {
 
 export interface RunOptions {
   readonly cwd?: string;
+  /** Piped to the child's stdin; used for `gh api --input -` bodies and pbcopy. */
+  readonly stdin?: string;
 }
 
 /**
@@ -27,12 +29,23 @@ export async function systemRunner(
   options: RunOptions = {},
 ): Promise<RunResult> {
   try {
-    const output = await new Deno.Command(cmd, {
+    const command = new Deno.Command(cmd, {
       args: [...args],
       cwd: options.cwd,
+      stdin: options.stdin === undefined ? "null" : "piped",
       stdout: "piped",
       stderr: "piped",
-    }).output();
+    });
+    let output: Deno.CommandOutput;
+    if (options.stdin === undefined) {
+      output = await command.output();
+    } else {
+      const child = command.spawn();
+      const writer = child.stdin.getWriter();
+      await writer.write(new TextEncoder().encode(options.stdin));
+      await writer.close();
+      output = await child.output();
+    }
     const decoder = new TextDecoder();
     return {
       code: output.code,

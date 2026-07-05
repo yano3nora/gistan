@@ -11,6 +11,8 @@ export interface CommandContext {
   readonly configPath: string;
   /** User home directory; used for the default gist repo location. */
   readonly home: string;
+  /** Interactive yes/no gate before destructive actions; injected for tests. */
+  readonly confirm: (message: string) => Promise<boolean>;
 }
 
 export interface CommandArgs {

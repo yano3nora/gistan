@@ -6,9 +6,14 @@ import type { Runner } from "./core/proc.ts";
  * In-memory CommandContext for tests: captures stdout/stderr as strings and
  * isolates the config file under the given (temporary) home directory.
  */
-export function memoryContext(runner: Runner, home: string) {
+export function memoryContext(
+  runner: Runner,
+  home: string,
+  options: { confirmAnswer?: boolean } = {},
+) {
   let stdout = "";
   let stderr = "";
+  const confirms: string[] = [];
   const decoder = new TextDecoder();
   const context: CommandContext = {
     stdout: {
@@ -26,9 +31,14 @@ export function memoryContext(runner: Runner, home: string) {
     runner,
     configPath: join(home, "config.toml"),
     home,
+    confirm(message: string): Promise<boolean> {
+      confirms.push(message);
+      return Promise.resolve(options.confirmAnswer ?? true);
+    },
   };
   return {
     context,
+    confirms,
     get stdout() {
       return stdout;
     },

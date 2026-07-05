@@ -43,6 +43,9 @@ function defaultContext(): CommandContext {
     runner: systemRunner,
     configPath: defaultConfigPath(env),
     home: env.HOME ?? ".",
+    // Deno's confirm() returns false on a non-TTY stdin, so destructive
+    // actions are safely refused when gistan is run non-interactively.
+    confirm: (message) => Promise.resolve(confirm(message)),
   };
 }
 
