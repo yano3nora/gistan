@@ -46,6 +46,7 @@ function defaultContext(): CommandContext {
     // Deno's confirm() returns false on a non-TTY stdin, so destructive
     // actions are safely refused when gistan is run non-interactively.
     confirm: (message) => Promise.resolve(confirm(message)),
+    editor: Deno.env.get("EDITOR") ?? "vi",
   };
 }
 

@@ -8,6 +8,11 @@ export interface RunOptions {
   readonly cwd?: string;
   /** Piped to the child's stdin; used for `gh api --input -` bodies and pbcopy. */
   readonly stdin?: string;
+  /**
+   * Inherit all stdio from the parent (fzf UI, $EDITOR sessions). stdout/stderr
+   * come back empty; only the exit code is meaningful. Ignores `stdin`.
+   */
+  readonly interactive?: boolean;
 }
 
 /**
@@ -29,6 +34,16 @@ export async function systemRunner(
   options: RunOptions = {},
 ): Promise<RunResult> {
   try {
+    if (options.interactive === true) {
+      const status = await new Deno.Command(cmd, {
+        args: [...args],
+        cwd: options.cwd,
+        stdin: "inherit",
+        stdout: "inherit",
+        stderr: "inherit",
+      }).spawn().status;
+      return { code: status.code, stdout: "", stderr: "" };
+    }
     const command = new Deno.Command(cmd, {
       args: [...args],
       cwd: options.cwd,

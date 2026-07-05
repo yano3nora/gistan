@@ -9,7 +9,7 @@ import type { Runner } from "./core/proc.ts";
 export function memoryContext(
   runner: Runner,
   home: string,
-  options: { confirmAnswer?: boolean } = {},
+  options: { confirmAnswer?: boolean; editor?: string } = {},
 ) {
   let stdout = "";
   let stderr = "";
@@ -35,6 +35,7 @@ export function memoryContext(
       confirms.push(message);
       return Promise.resolve(options.confirmAnswer ?? true);
     },
+    editor: options.editor ?? "vi",
   };
   return {
     context,

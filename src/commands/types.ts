@@ -13,6 +13,8 @@ export interface CommandContext {
   readonly home: string;
   /** Interactive yes/no gate before destructive actions; injected for tests. */
   readonly confirm: (message: string) => Promise<boolean>;
+  /** $EDITOR (fallback "vi"); vim-family names get line-jump / read-only flags. */
+  readonly editor: string;
 }
 
 export interface CommandArgs {

@@ -27,7 +27,7 @@ SPEC-0001 の v1 コマンドが動作し、日常利用を開始できる。
 - [x] 照合エンジン (index・local・remote の三者照合) — 260705 `src/core/reconcile.ts` 純関数として実装
 - [x] `gistan status` — 未公開 / 公開中 / local drift / remote drift / conflict の判定・表示 — 260705 remote 到達不可時は local-only 判定に degrade
 - [x] `gistan publish` — 新規作成 / 冪等更新 / description 自動生成 / URL クリップボード / 可視性変更時の警告付き再作成 — 260705 body は `gh api --input -` の stdin 渡し
-- [ ] `gistan search` — rg + fzf ライブ全文検索 (snippets + stars)
+- [x] `gistan search` — rg + fzf ライブ全文検索 (snippets + stars) — 260705 fzf reload 方式、vim 系は行ジャンプ + stars read-only。対話 UI の実機確認は人間実行
 - [ ] `gistan import` — paging / multi-file gist のディレクトリ保持 / description からの tags 逆輸入 / gitleaks スキャン (検出時 commit ブロック)
 - [ ] 実データ (約 753 gists) で import → search → publish の一連を検証
 

@@ -23,6 +23,7 @@ function memoryContext() {
     configPath: "/nonexistent/gistan-test/config.toml",
     home: "/nonexistent/gistan-test",
     confirm: () => Promise.resolve(true),
+    editor: "vi",
   };
 
   return {
