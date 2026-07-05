@@ -1,6 +1,5 @@
-import { basename } from "@std/path";
-import { loadConfig } from "../core/config.ts";
 import { checkDeps, DEPS } from "../core/deps.ts";
+import { FZF_ABORTED, FZF_NO_MATCH, openEditor, requireConfig } from "./shared.ts";
 import type { CommandArgs, CommandContext } from "./types.ts";
 import { writeText } from "./types.ts";
 
@@ -16,16 +15,11 @@ const GREP_CMD =
 const LIST_CMD = "rg --files --no-ignore snippets stars";
 const RELOAD_CMD = `if [ -n {q} ]; then ${GREP_CMD}; else ${LIST_CMD}; fi`;
 
-/** fzf exit codes that mean "the user just left without picking" — not errors. */
-const FZF_NO_MATCH = 1;
-const FZF_ABORTED = 130;
-
 export async function run(command: CommandArgs, context: CommandContext): Promise<number> {
   const err = (text: string) => writeText(context.stderr, text);
 
-  const config = await loadConfig(context.configPath);
+  const config = await requireConfig(context);
   if (config === undefined) {
-    await err("error: gistan is not initialized — run `gistan init`\n");
     return 1;
   }
 
@@ -68,23 +62,5 @@ export async function run(command: CommandArgs, context: CommandContext): Promis
     return 0;
   }
   const [path, line] = selection.split(":");
-  const opened = await context.runner(
-    context.editor,
-    editorArgs(context.editor, path, line),
-    { cwd: config.repo, interactive: true },
-  );
-  return opened.code;
-}
-
-/**
- * vim-family editors get a line jump (grep picks only — file-list picks have
- * no line), and -R for stars/ (read-only mirrors, SPEC-0001). Other editors
- * just get the file — flags are not portable.
- */
-function editorArgs(editor: string, path: string, line: string | undefined): string[] {
-  if (!["vi", "vim", "nvim"].includes(basename(editor))) {
-    return [path];
-  }
-  const args = line === undefined ? [path] : [`+${line}`, path];
-  return path.startsWith("stars/") ? ["-R", ...args] : args;
+  return await openEditor(context, config.repo, path, line);
 }

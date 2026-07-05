@@ -10,12 +10,11 @@ export async function contentHash(data: Uint8Array): Promise<string> {
 }
 
 /**
- * Scans snippets/ recursively (multi-file gist imports live in subdirectories)
- * and returns repo-relative POSIX paths — the index key format — mapped to
- * their current content hash.
+ * Recursive file listing under a top-level dir (snippets/stars); returns
+ * repo-relative POSIX paths — the index key format. No hashing (cheap).
  */
-export async function scanSnippets(repoDir: string): Promise<Map<string, string>> {
-  const result = new Map<string, string>();
+export async function listFilesUnder(repoDir: string, top: string): Promise<string[]> {
+  const result: string[] = [];
 
   async function walk(abs: string, rel: string): Promise<void> {
     try {
@@ -28,7 +27,7 @@ export async function scanSnippets(repoDir: string): Promise<Map<string, string>
         if (entry.isDirectory) {
           await walk(absChild, relChild);
         } else if (entry.isFile) {
-          result.set(relChild, await contentHash(await Deno.readFile(absChild)));
+          result.push(relChild);
         }
       }
     } catch (error) {
@@ -39,6 +38,18 @@ export async function scanSnippets(repoDir: string): Promise<Map<string, string>
     }
   }
 
-  await walk(join(repoDir, "snippets"), "snippets");
+  await walk(join(repoDir, top), top);
+  return result.sort();
+}
+
+/**
+ * Scans snippets/ recursively (multi-file gist imports live in subdirectories)
+ * and maps each repo-relative path to its current content hash.
+ */
+export async function scanSnippets(repoDir: string): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  for (const rel of await listFilesUnder(repoDir, "snippets")) {
+    result.set(rel, await contentHash(await Deno.readFile(join(repoDir, rel))));
+  }
   return result;
 }

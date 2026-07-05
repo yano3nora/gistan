@@ -85,15 +85,20 @@ gist 向け snippets を集約する markdown repo (= gist repo) の構成・運
 
 ### 公開停止: `gistan unpublish <path>`
 
-- remote gist を削除し、index から gist 紐付けを除去。local ファイルは残す
+- remote gist を削除し、index の gist 紐付けを null にする。local ファイルと tags は残す
 - URL・コメント・fork が失われることを警告し確認を取る
+
+### 削除: `gistan rm [path]`
+
+- path 省略時は fzf で選択。削除前に確認を取り、published なら remote gist も消すか追加確認する (残す場合は unmanaged になる旨を表示し、index からは除去)
+- `stars/` 配下は拒否する (read-only mirror。star sync で復元されるため)
 
 ### 取り込み: `gistan pull [path]`
 
 - published snippets について remote の変更を取得する (スマホ等で gist を直接編集したケースの回収)
 - remote のみ変更 → local へ反映。local のみ変更 → 何もしない (publish を案内)
-- **両方変更 (conflict) → diff を提示し、local 優先 / remote 優先 / skip を人間が選ぶ。自動マージはしない**
-- `--stars` 付きで star mirror も更新する
+- **両方変更 (conflict) → diff を提示し「remote で上書きするか」を確認。しない場合は local 温存 (skip) となり、`publish` で押し返すのが local 優先に相当。自動マージはしない**
+- `--stars` 付きで star mirror も更新する (v3 で提供。それまではエラー)
 
 ### 状態確認: `gistan status [path] [--remote]`
 
@@ -126,7 +131,7 @@ gist 向け snippets を集約する markdown repo (= gist repo) の構成・運
 
 ### git 操作: `gistan sync` / `gistan root`
 
-- `sync`: `git add -A && git commit -m "docs: auto sync" && git pull --rebase && git push` の糖衣
+- `sync`: `git add -A && git commit -m "docs: auto sync (gistan)" && git pull --rebase && git push` の糖衣。remote 未設定なら local commit まで行い pull / push はスキップ
 - `root`: gist repo の絶対パスを出力 (`cd $(gistan root)` 用)
 
 ## Invariants

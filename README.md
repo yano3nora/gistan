@@ -56,14 +56,17 @@ mise exec -- deno run -A src/main.ts publish
 mise exec -- deno run -A src/main.ts status
 ```
 
-v1 subcommands:
+Subcommands (see `gistan --help`):
 
-- `init` — set up a gist repo or connect an existing one
+- `init` — set up a local gist repo (no remote is created; push is up to you)
 - `import` — import existing gists into the local repo (`--limit N` for a trial batch)
-- `search` — live full-text search (rg + fzf) over snippets and starred mirrors
-- `publish` — publish or update a snippet as a gist (`--secret|--public`, `--description`)
-- `status` — show publish and drift status (local by default; `--remote` checks against
-  gist.github.com)
+- `new` / `edit` / `list` / `rm` — daily snippet operations
+- `search` — live full-text search (rg + fzf); empty query lists files
+- `publish` / `unpublish` — manage the gist side of a snippet
+- `pull` — take remote gist edits into the repo (conflicts prompt with a diff)
+- `status` — publish/drift overview (local by default; `--remote` checks gist.github.com)
+- `doctor` — interactive repair of index/remote inconsistencies
+- `sync` / `root` — git convenience and shell interop
 
 Running bare `gistan` opens search directly.
 
@@ -107,6 +110,16 @@ gistan hello                       # same as `gistan search hello`
 gistan import --limit 5
 gistan status
 gistan import                      # full run + gitleaks scan at the end
+
+# 9. v2 quick pass
+gistan new --tags demo hello2.md   # template + index + editor
+gistan list --tag demo
+gistan edit hello2                 # fuzzy pick → editor
+gistan pull                        # after editing a gist in the browser: takes it in
+gistan unpublish hello.md          # deletes the gist, keeps the file
+gistan rm hello2.md                # confirmed delete (asks about the gist too)
+gistan doctor                      # after rm-ing a file or a gist by hand
+gistan sync                        # commit (+ pull/push only when a remote exists)
 
 # cleanup: delete the test gist and the local fixture
 gh api gists/<id> --method DELETE

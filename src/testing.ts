@@ -9,7 +9,7 @@ import type { Runner } from "./core/proc.ts";
 export function memoryContext(
   runner: Runner,
   home: string,
-  options: { confirmAnswer?: boolean; editor?: string } = {},
+  options: { confirmAnswer?: boolean | boolean[]; editor?: string } = {},
 ) {
   let stdout = "";
   let stderr = "";
@@ -33,7 +33,11 @@ export function memoryContext(
     home,
     confirm(message: string): Promise<boolean> {
       confirms.push(message);
-      return Promise.resolve(options.confirmAnswer ?? true);
+      // An array answers confirms in sequence (exhausted → true).
+      const answer = Array.isArray(options.confirmAnswer)
+        ? options.confirmAnswer[confirms.length - 1] ?? true
+        : options.confirmAnswer ?? true;
+      return Promise.resolve(answer);
     },
     editor: options.editor ?? "vi",
   };

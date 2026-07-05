@@ -1,6 +1,20 @@
 import type { Runner } from "../core/proc.ts";
 
-export type CommandName = "init" | "import" | "search" | "publish" | "status";
+export type CommandName =
+  | "init"
+  | "new"
+  | "search"
+  | "edit"
+  | "list"
+  | "rm"
+  | "publish"
+  | "unpublish"
+  | "pull"
+  | "status"
+  | "doctor"
+  | "import"
+  | "sync"
+  | "root";
 
 export interface CommandContext {
   readonly stdout: Pick<typeof Deno.stdout, "write">;
