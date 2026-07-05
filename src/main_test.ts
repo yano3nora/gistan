@@ -19,6 +19,9 @@ function memoryContext() {
         return Promise.resolve(chunk.byteLength);
       },
     },
+    runner: () => Promise.resolve({ code: 0, stdout: "", stderr: "" }),
+    configPath: "/nonexistent/gistan-test/config.toml",
+    home: "/nonexistent/gistan-test",
   };
 
   return {

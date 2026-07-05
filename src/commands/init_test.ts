@@ -1,0 +1,107 @@
+import { assertEquals } from "@std/assert";
+import { join } from "@std/path";
+import { loadConfig } from "../core/config.ts";
+import { EXIT_COMMAND_NOT_FOUND, type Runner } from "../core/proc.ts";
+import { run } from "./init.ts";
+import type { CommandContext } from "./types.ts";
+
+function memoryContext(runner: Runner, home: string) {
+  let stdout = "";
+  let stderr = "";
+  const decoder = new TextDecoder();
+  const context: CommandContext = {
+    stdout: {
+      write(chunk: Uint8Array): Promise<number> {
+        stdout += decoder.decode(chunk, { stream: true });
+        return Promise.resolve(chunk.byteLength);
+      },
+    },
+    stderr: {
+      write(chunk: Uint8Array): Promise<number> {
+        stderr += decoder.decode(chunk, { stream: true });
+        return Promise.resolve(chunk.byteLength);
+      },
+    },
+    runner,
+    configPath: join(home, "config.toml"),
+    home,
+  };
+  return {
+    context,
+    get stdout() {
+      return stdout;
+    },
+    get stderr() {
+      return stderr;
+    },
+  };
+}
+
+const ok = { code: 0, stdout: "", stderr: "" };
+
+Deno.test("init creates the repo, scaffolds it, and is idempotent", async () => {
+  const home = await Deno.makeTempDir();
+  const repoDir = join(home, "gistan");
+  const runner: Runner = async (cmd, args) => {
+    if (cmd === "gh" && args[0] === "repo" && args[1] === "view") {
+      return { code: 1, stdout: "", stderr: "not found" };
+    }
+    if (cmd === "gh" && args[0] === "repo" && args[1] === "create") {
+      // Simulate gh's `--clone`: the checkout appears on disk with a .git directory.
+      await Deno.mkdir(join(repoDir, ".git"), { recursive: true });
+      return ok;
+    }
+    return ok;
+  };
+
+  const first = memoryContext(runner, home);
+  assertEquals(await run({ name: "init", args: [] }, first.context), 0);
+  assertEquals(first.stdout.includes('created private repo "gistan"'), true);
+  assertEquals(
+    JSON.parse(await Deno.readTextFile(join(repoDir, ".gistan", "state.json"))),
+    { version: 1, snippets: {} },
+  );
+  const gitignore = await Deno.readTextFile(join(repoDir, ".gitignore"));
+  assertEquals(gitignore.includes("stars/"), true);
+  assertEquals(gitignore.includes(".gistan/cache/"), true);
+  assertEquals(await loadConfig(join(home, "config.toml")), { repo: repoDir });
+
+  const second = memoryContext(runner, home);
+  assertEquals(await run({ name: "init", args: [] }, second.context), 0);
+  assertEquals(second.stdout.includes("using existing repo"), true);
+});
+
+Deno.test("init fails fast when a required dependency is missing", async () => {
+  const home = await Deno.makeTempDir();
+  const runner: Runner = (cmd) =>
+    Promise.resolve(
+      cmd === "gh" ? { code: EXIT_COMMAND_NOT_FOUND, stdout: "", stderr: "" } : ok,
+    );
+
+  const io = memoryContext(runner, home);
+  assertEquals(await run({ name: "init", args: [] }, io.context), 1);
+  assertEquals(io.stderr.includes("gh not found"), true);
+});
+
+Deno.test("init guides the user when gh is not authenticated", async () => {
+  const home = await Deno.makeTempDir();
+  const runner: Runner = (cmd, args) =>
+    Promise.resolve(
+      cmd === "gh" && args[0] === "auth" ? { code: 1, stdout: "", stderr: "" } : ok,
+    );
+
+  const io = memoryContext(runner, home);
+  assertEquals(await run({ name: "init", args: [] }, io.context), 1);
+  assertEquals(io.stderr.includes("gh auth login"), true);
+});
+
+Deno.test("init refuses a non-empty directory that is not a git repo", async () => {
+  const home = await Deno.makeTempDir();
+  const dir = join(home, "occupied");
+  await Deno.mkdir(dir);
+  await Deno.writeTextFile(join(dir, "something.txt"), "hi");
+
+  const io = memoryContext(() => Promise.resolve(ok), home);
+  assertEquals(await run({ name: "init", args: [dir] }, io.context), 1);
+  assertEquals(io.stderr.includes("not a git repo"), true);
+});

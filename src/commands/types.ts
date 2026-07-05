@@ -1,8 +1,16 @@
+import type { Runner } from "../core/proc.ts";
+
 export type CommandName = "init" | "import" | "search" | "publish" | "status";
 
 export interface CommandContext {
   readonly stdout: Pick<typeof Deno.stdout, "write">;
   readonly stderr: Pick<typeof Deno.stderr, "write">;
+  /** External command boundary; tests inject a fake to avoid touching gh/git. */
+  readonly runner: Runner;
+  /** Path to config.toml; injected so tests never read or write the real one. */
+  readonly configPath: string;
+  /** User home directory; used for the default gist repo location. */
+  readonly home: string;
 }
 
 export interface CommandArgs {

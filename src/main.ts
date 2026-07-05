@@ -6,6 +6,8 @@ import { run as runSearch } from "./commands/search.ts";
 import { run as runStatus } from "./commands/status.ts";
 import type { CommandContext, CommandHandler, CommandName } from "./commands/types.ts";
 import { writeText } from "./commands/types.ts";
+import { defaultConfigPath } from "./core/config.ts";
+import { systemRunner } from "./core/proc.ts";
 
 export const VERSION = "gistan 0.1.0";
 
@@ -31,9 +33,16 @@ export interface RunOptions {
 }
 
 function defaultContext(): CommandContext {
+  const env = {
+    HOME: Deno.env.get("HOME"),
+    XDG_CONFIG_HOME: Deno.env.get("XDG_CONFIG_HOME"),
+  };
   return {
     stdout: Deno.stdout,
     stderr: Deno.stderr,
+    runner: systemRunner,
+    configPath: defaultConfigPath(env),
+    home: env.HOME ?? ".",
   };
 }
 

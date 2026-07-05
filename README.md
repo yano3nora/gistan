@@ -47,13 +47,13 @@ now and return a "not implemented" error. See `docs/SPEC-0001-gistan-cli.md` for
 ## Commands
 
 ```sh
-mise exec -- deno run src/main.ts --help
-mise exec -- deno run src/main.ts --version
-mise exec -- deno run src/main.ts init
-mise exec -- deno run src/main.ts import
-mise exec -- deno run src/main.ts search
-mise exec -- deno run src/main.ts publish
-mise exec -- deno run src/main.ts status
+mise exec -- deno run -A src/main.ts --help
+mise exec -- deno run -A src/main.ts --version
+mise exec -- deno run -A src/main.ts init
+mise exec -- deno run -A src/main.ts import
+mise exec -- deno run -A src/main.ts search
+mise exec -- deno run -A src/main.ts publish
+mise exec -- deno run -A src/main.ts status
 ```
 
 v1 scaffolded subcommands:
