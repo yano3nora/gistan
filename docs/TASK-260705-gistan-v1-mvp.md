@@ -20,7 +20,7 @@ SPEC-0001 の v1 コマンドが動作し、日常利用を開始できる。
 
 ## todo
 
-- [ ] Deno プロジェクト scaffold (`deno.json`, fmt / lint / test 設定, `src/` 構成, README 更新)
+- [x] Deno プロジェクト scaffold (`deno.json`, fmt / lint / test 設定, `src/` 構成, README 更新) — 260705 codex exec + 手直し (DENO_DIR 除去, import map 整理)
 - [ ] config (`~/.config/gistan/config.toml`) の読み書きと外部 CLI (gh / git / rg / fzf) の存在検査
 - [ ] `gistan init` — gh auth 確認 / repo 作成 or clone / 雛形 (`snippets/` `stars/` `.gistan/` `.gitignore`) 配置
 - [ ] index (`.gistan/state.json`) の読み書きモジュール (key ソート済み書き出し)
