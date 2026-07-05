@@ -7,16 +7,13 @@ import { run } from "./init.ts";
 
 const ok = { code: 0, stdout: "", stderr: "" };
 
-Deno.test("init creates the repo, scaffolds it, and is idempotent", async () => {
+Deno.test("init creates a local repo, scaffolds it, and is idempotent", async () => {
   const home = await Deno.makeTempDir();
   const repoDir = join(home, "gistan");
-  const runner: Runner = async (cmd, args) => {
-    if (cmd === "gh" && args[0] === "repo" && args[1] === "view") {
-      return { code: 1, stdout: "", stderr: "not found" };
-    }
-    if (cmd === "gh" && args[0] === "repo" && args[1] === "create") {
-      // Simulate gh's `--clone`: the checkout appears on disk with a .git directory.
-      await Deno.mkdir(join(repoDir, ".git"), { recursive: true });
+  const runner: Runner = async (cmd, args, options) => {
+    if (cmd === "git" && args[0] === "init") {
+      // Simulate git: a .git directory appears in the cwd.
+      await Deno.mkdir(join(options?.cwd ?? ".", ".git"), { recursive: true });
       return ok;
     }
     return ok;
@@ -24,7 +21,7 @@ Deno.test("init creates the repo, scaffolds it, and is idempotent", async () => 
 
   const first = memoryContext(runner, home);
   assertEquals(await run({ name: "init", args: [] }, first.context), 0);
-  assertEquals(first.stdout.includes('created private repo "gistan"'), true);
+  assertEquals(first.stdout.includes("initialized a local git repo"), true);
   assertEquals(
     JSON.parse(await Deno.readTextFile(join(repoDir, ".gistan", "state.json"))),
     { version: 1, snippets: {} },

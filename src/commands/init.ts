@@ -1,5 +1,5 @@
 import { parseArgs } from "@std/cli/parse-args";
-import { basename, dirname, join, resolve } from "@std/path";
+import { join, resolve } from "@std/path";
 import { loadConfig, saveConfig } from "../core/config.ts";
 import { checkDeps } from "../core/deps.ts";
 import type { CommandArgs, CommandContext } from "./types.ts";
@@ -14,7 +14,7 @@ const DEFAULT_TEMPLATE = "# {{title}}\n";
 const GITIGNORE_LINES = ["stars/", ".gistan/cache/"];
 
 export async function run(command: CommandArgs, context: CommandContext): Promise<number> {
-  const flags = parseArgs([...command.args], { boolean: ["public"] });
+  const flags = parseArgs([...command.args]);
   const out = (text: string) => writeText(context.stdout, text);
   const err = (text: string) => writeText(context.stderr, text);
 
@@ -44,7 +44,7 @@ export async function run(command: CommandArgs, context: CommandContext): Promis
   const configured = await loadConfig(context.configPath);
   const dir = resolve(requested ?? configured?.repo ?? join(context.home, "gistan"));
 
-  if (!(await ensureRepoDir(dir, flags.public === true, context))) {
+  if (!(await ensureRepoDir(dir, context))) {
     return 1;
   }
   await scaffold(dir);
@@ -59,15 +59,12 @@ export async function run(command: CommandArgs, context: CommandContext): Promis
 }
 
 /**
- * Makes `dir` exist as a git repo, in whichever way fits its current state:
- * adopt an existing repo, adopt an empty dir (git init), clone the same-named
- * remote (second-machine setup), or create a fresh repo via gh.
+ * Makes `dir` exist as a LOCAL git repo: adopt an existing one, or `git init`
+ * an empty/missing directory. gistan never creates a remote or pushes — the
+ * repo stays local until the human decides otherwise. Second machine setup is
+ * "clone it yourself, then `gistan init <dir>`".
  */
-async function ensureRepoDir(
-  dir: string,
-  isPublic: boolean,
-  context: CommandContext,
-): Promise<boolean> {
+async function ensureRepoDir(dir: string, context: CommandContext): Promise<boolean> {
   const out = (text: string) => writeText(context.stdout, text);
   const err = (text: string) => writeText(context.stderr, text);
 
@@ -82,40 +79,17 @@ async function ensureRepoDir(
     );
     return false;
   }
-  if (state === "empty") {
-    const init = await context.runner("git", ["init"], { cwd: dir });
-    if (init.code !== 0) {
-      await err(init.stderr);
-      return false;
-    }
-    await out(`ok: initialized a local git repo at ${dir} (no remote yet)\n`);
-    return true;
+  if (state === "missing") {
+    await Deno.mkdir(dir, { recursive: true });
   }
-
-  // Missing dir: reuse the same-named remote when it exists, otherwise create it.
-  // Repo name = directory basename, so `gh repo create --clone` run in the parent
-  // directory checks out exactly at `dir`.
-  const name = basename(dir);
-  const view = await context.runner("gh", ["repo", "view", name]);
-  if (view.code === 0) {
-    const clone = await context.runner("gh", ["repo", "clone", name, dir]);
-    if (clone.code !== 0) {
-      await err(clone.stderr);
-      return false;
-    }
-    await out(`ok: cloned existing repo "${name}" into ${dir}\n`);
-    return true;
-  }
-  await Deno.mkdir(dirname(dir), { recursive: true });
-  const visibility = isPublic ? "--public" : "--private";
-  const create = await context.runner("gh", ["repo", "create", name, visibility, "--clone"], {
-    cwd: dirname(dir),
-  });
-  if (create.code !== 0) {
-    await err(create.stderr);
+  const init = await context.runner("git", ["init"], { cwd: dir });
+  if (init.code !== 0) {
+    await err(init.stderr);
     return false;
   }
-  await out(`ok: created ${isPublic ? "public" : "private"} repo "${name}", cloned into ${dir}\n`);
+  await out(
+    `ok: initialized a local git repo at ${dir} (add a remote and push whenever you want)\n`,
+  );
   return true;
 }
 

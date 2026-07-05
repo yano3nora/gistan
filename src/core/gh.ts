@@ -103,3 +103,64 @@ export async function deleteGist(runner: Runner, id: string): Promise<void> {
     throw new Error(`gist delete failed: ${result.stderr.trim() || `exit ${result.code}`}`);
   }
 }
+
+export interface GistSummary {
+  readonly id: string;
+  readonly description: string;
+  readonly public: boolean;
+  readonly updated_at: string;
+}
+
+/**
+ * Pages manually (no --paginate) so every response body is one valid JSON
+ * array — `--paginate` concatenates arrays back to back, which JSON.parse
+ * cannot read.
+ */
+export async function listOwnGistSummaries(
+  runner: Runner,
+  onPage?: (page: number, total: number) => Promise<void>,
+): Promise<GistSummary[]> {
+  const all: GistSummary[] = [];
+  for (let page = 1;; page++) {
+    const result = await runner("gh", ["api", `gists?per_page=100&page=${page}`]);
+    if (result.code !== 0) {
+      throw new Error(`gh api gists failed: ${result.stderr.trim() || `exit ${result.code}`}`);
+    }
+    const items = JSON.parse(result.stdout) as Array<
+      { id: string; description: string | null; public: boolean; updated_at: string }
+    >;
+    if (items.length === 0) {
+      break;
+    }
+    all.push(...items.map((item) => ({
+      id: item.id,
+      description: item.description ?? "",
+      public: item.public,
+      updated_at: item.updated_at,
+    })));
+    await onPage?.(page, all.length);
+    if (items.length < 100) {
+      break;
+    }
+  }
+  return all;
+}
+
+export interface GistDetailFile {
+  readonly filename: string;
+  readonly content?: string;
+  /** Set by the API for files over ~1MB; the content field is then incomplete. */
+  readonly truncated?: boolean;
+}
+
+/** The list endpoint has no file contents; each import needs this per-gist call. */
+export async function getGistFiles(runner: Runner, id: string): Promise<GistDetailFile[]> {
+  const result = await runner("gh", ["api", `gists/${id}`]);
+  if (result.code !== 0) {
+    throw new Error(`gist fetch failed (${id}): ${result.stderr.trim() || `exit ${result.code}`}`);
+  }
+  const data = JSON.parse(result.stdout) as {
+    files?: Record<string, GistDetailFile>;
+  };
+  return Object.values(data.files ?? {});
+}

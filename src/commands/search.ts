@@ -5,12 +5,16 @@ import type { CommandArgs, CommandContext } from "./types.ts";
 import { writeText } from "./types.ts";
 
 /**
- * fzf re-runs this on every keystroke (live grep). stars/ is gitignored (a
+ * fzf re-runs this on every keystroke. Empty query = file list (title-level
+ * browsing); any input = live full-text grep. No minimum query length — CJK
+ * queries are often a single meaningful character. stars/ is gitignored (a
  * cache), so --no-ignore insures it is never dropped from results, whatever
  * a given rg version's ignore semantics for explicit path arguments are.
  */
-const RELOAD_CMD =
+const GREP_CMD =
   "rg --column --line-number --no-heading --color=always --smart-case --no-ignore -- {q} snippets stars || true";
+const LIST_CMD = "rg --files --no-ignore snippets stars";
+const RELOAD_CMD = `if [ -n {q} ]; then ${GREP_CMD}; else ${LIST_CMD}; fi`;
 
 /** fzf exit codes that mean "the user just left without picking" — not errors. */
 const FZF_NO_MATCH = 1;
@@ -73,13 +77,14 @@ export async function run(command: CommandArgs, context: CommandContext): Promis
 }
 
 /**
- * vim-family editors get a line jump, and -R for stars/ (read-only mirrors,
- * SPEC-0001). Other editors just get the file — flags are not portable.
+ * vim-family editors get a line jump (grep picks only — file-list picks have
+ * no line), and -R for stars/ (read-only mirrors, SPEC-0001). Other editors
+ * just get the file — flags are not portable.
  */
-function editorArgs(editor: string, path: string, line: string): string[] {
+function editorArgs(editor: string, path: string, line: string | undefined): string[] {
   if (!["vi", "vim", "nvim"].includes(basename(editor))) {
     return [path];
   }
-  const args = [`+${line}`, path];
+  const args = line === undefined ? [path] : [`+${line}`, path];
   return path.startsWith("stars/") ? ["-R", ...args] : args;
 }

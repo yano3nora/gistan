@@ -56,6 +56,24 @@ Deno.test("dispatches a known subcommand without spawning a subprocess", async (
   assertEquals(io.stderr, "");
 });
 
+Deno.test("bare invocation drops into search", async () => {
+  const io = memoryContext();
+  let received: CommandArgs | undefined;
+
+  const code = await run([], {
+    context: io.context,
+    commands: {
+      search(command) {
+        received = command;
+        return 0;
+      },
+    },
+  });
+
+  assertEquals(code, 0);
+  assertEquals(received, { name: "search", args: [] });
+});
+
 Deno.test("returns usage on an unknown subcommand", async () => {
   const io = memoryContext();
 

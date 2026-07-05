@@ -47,6 +47,16 @@ Deno.test("search opens the picked snippet at its line in a vim-family editor", 
   assertEquals(editor?.options?.interactive, true);
 });
 
+Deno.test("a file-list pick (no line part) opens without a line jump", async () => {
+  const home = await fixture();
+  const { runner, calls } = searchRunner({ code: 0, stdout: "snippets/a.md\n" });
+  const io = memoryContext(runner, home, { editor: "vim" });
+
+  assertEquals(await run({ name: "search", args: [] }, io.context), 0);
+  const editor = calls.find((call) => call.cmd === "vim");
+  assertEquals(editor?.args, ["snippets/a.md"]);
+});
+
 Deno.test("search opens stars matches read-only", async () => {
   const home = await fixture();
   const { runner, calls } = searchRunner({ code: 0, stdout: "stars/octo/g1/note.md:1:1:x\n" });

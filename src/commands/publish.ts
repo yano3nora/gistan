@@ -1,6 +1,7 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { basename, join } from "@std/path";
 import { loadConfig } from "../core/config.ts";
+import { buildDescription } from "../core/description.ts";
 import { createGist, deleteGist, gistUrl, updateGist } from "../core/gh.ts";
 import { EXIT_COMMAND_NOT_FOUND } from "../core/proc.ts";
 import { contentHash } from "../core/snippets.ts";
@@ -49,7 +50,7 @@ export async function run(command: CommandArgs, context: CommandContext): Promis
   const state = await loadState(config.repo);
   const entry = state.snippets[relPath] ?? { tags: [], gist: null };
   const filename = basename(relPath);
-  const description = flags.description ?? defaultDescription(entry.tags, filename);
+  const description = flags.description ?? buildDescription(entry.tags, filename);
 
   let link: GistLink;
   try {
@@ -123,11 +124,6 @@ export async function run(command: CommandArgs, context: CommandContext): Promis
   });
   await copyToClipboard(context, gistUrl(link.id));
   return 0;
-}
-
-/** Mirrors the user's long-standing gist naming convention: `[tag1][tag2]: <filename>`. */
-function defaultDescription(tags: readonly string[], filename: string): string {
-  return tags.length > 0 ? `${tags.map((tag) => `[${tag}]`).join("")}: ${filename}` : filename;
 }
 
 /** Best-effort (macOS pbcopy). The URL is always printed, so failure is not an error. */

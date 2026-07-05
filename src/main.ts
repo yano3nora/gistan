@@ -86,7 +86,8 @@ export async function run(argv: readonly string[], options: RunOptions = {}): Pr
   }
 
   const [rawCommand, ...commandArgs] = parsed._.map(String);
-  const commandName = resolveCommand(rawCommand);
+  // Bare `gistan` drops straight into search — the most frequent entry point.
+  const commandName = rawCommand === undefined ? "search" : resolveCommand(rawCommand);
 
   if (commandName === undefined) {
     await writeText(context.stderr, usage());

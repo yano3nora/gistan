@@ -49,10 +49,10 @@ gist 向け snippets を集約する markdown repo (= gist repo) の構成・運
 
 ## Behavior
 
-### セットアップ: `gistan init`
+### セットアップ: `gistan init [dir]`
 
-1. `gh auth status` を確認 (未認証なら `gh auth login` を案内して終了)
-2. gist repo を GitHub 上に作成 (default: private) または既存 repo を clone (2 台目のマシンはこちら)
+1. `gh auth status` を確認 (未認証なら `gh auth login` を案内して終了。publish / import の事前検査)
+2. gist repo を**ローカルに**用意する: 既存 git repo なら採用、空・不在なら `git init`。**remote repo の作成・push は gistan は行わない** (公開・配布は人間判断)。2 台目のマシンでは人間が clone したディレクトリを `gistan init <dir>` で採用する
 3. `~/.config/gistan/config.toml` に repo の local path を記録
 4. repo 内に `snippets/` `stars/` `.gistan/` と template、`.gitignore` (`stars/` と `.gistan/cache/` を除外) を配置 (既存なら何もしない)
 
@@ -68,6 +68,8 @@ gist 向け snippets を集約する markdown repo (= gist repo) の構成・運
 ### 検索・閲覧・編集: `gistan search [query]` / `gistan edit [query]` / `gistan list`
 
 - `search`: rg + fzf によるライブ全文検索。`snippets/` と `stars/` の両方を対象とし、選択したら `$EDITOR` (stars は read-only 表示) で開く
+    - **空クエリ時はファイル一覧を表示** (タイトル俯瞰)、入力があると全文 grep に切り替わる。最低文字数は設けない (CJK は 1 文字が意味を持つため)
+    - `gistan` を引数なしで実行した場合も search を起動する (最頻の導線を最短にする)
 - `edit`: ファイル名 fuzzy 選択 → `$EDITOR`
 - `list [--tag <t>] [--published | --local | --stars]`: 一覧表示。published なら gist URL・可視性も表示
 - これらは糖衣であり、`cd $(gistan root)` して直接 rg / vim を使う操作を常に許容する
@@ -93,9 +95,10 @@ gist 向け snippets を集約する markdown repo (= gist repo) の構成・運
 - **両方変更 (conflict) → diff を提示し、local 優先 / remote 優先 / skip を人間が選ぶ。自動マージはしない**
 - `--stars` 付きで star mirror も更新する
 
-### 状態確認: `gistan status [path]`
+### 状態確認: `gistan status [path] [--remote]`
 
-- snippet ごとに「未公開 / 公開中 (public|secret, URL) / local drift / remote drift / conflict」を表示
+- 既定は**ローカル判定のみ** (unpublished / published / local-drift / file-missing)。remote 一覧の取得は数百 gist で約 10 秒かかるため、remote-drift / conflict / remote-deleted の検出は `--remote` 指定時のみ行う
+- 表示パスの `snippets/` プレフィックスは省略する (構造であって情報ではない)
 - path 省略時は repo 全体のサマリ
 
 ### 整合性検査: `gistan doctor`
@@ -151,18 +154,18 @@ gist 向け snippets を集約する markdown repo (= gist repo) の構成・運
 ### コマンド一覧
 
 ```
-gistan init                                   # セットアップ (作成 or clone)
+gistan init [dir]                             # セットアップ (ローカル repo の採用 or git init。remote は作らない)
 gistan new [--tags <t1,t2>] <filename>        # snippet 作成
-gistan search [query]                         # rg + fzf ライブ全文検索 (stars 含む)
+gistan [query] / gistan search [query]        # rg + fzf ライブ全文検索 (stars 含む。空クエリはファイル一覧)
 gistan edit [query]                           # fuzzy 選択して $EDITOR
 gistan list [--tag <t>] [--published|--local|--stars]
 gistan publish <path> [--secret|--public] [--description <text>]
 gistan unpublish <path>
 gistan pull [path] [--stars]
-gistan status [path]
+gistan status [path] [--remote]
 gistan doctor
 gistan star sync | gistan star add <gist-url>
-gistan import                                 # 既存 gist 一括移行 (一度きり)
+gistan import [--limit <n>]                   # 既存 gist 一括移行 (一度きり)
 gistan sync                                   # git add/commit/pull/push
 gistan root                                   # repo パス出力
 ```

@@ -56,10 +56,59 @@ mise exec -- deno run -A src/main.ts publish
 mise exec -- deno run -A src/main.ts status
 ```
 
-v1 scaffolded subcommands:
+v1 subcommands:
 
 - `init` — set up a gist repo or connect an existing one
-- `import` — import existing gists into the local repo
-- `search` — search snippets and starred gist mirrors
-- `publish` — publish or update a snippet as a gist
-- `status` — show publish and drift status for snippets
+- `import` — import existing gists into the local repo (`--limit N` for a trial batch)
+- `search` — live full-text search (rg + fzf) over snippets and starred mirrors
+- `publish` — publish or update a snippet as a gist (`--secret|--public`, `--description`)
+- `status` — show publish and drift status (local by default; `--remote` checks against
+  gist.github.com)
+
+Running bare `gistan` opens search directly.
+
+## Manual E2E check
+
+Prerequisites: `gh` authenticated with the gist scope (`gh auth refresh -s gist`), `rg`, `fzf`, and
+`gitleaks` (`brew install gitleaks`) installed.
+
+```sh
+# 0. build a binary and use it via an alias
+mise exec -- deno task compile
+alias gistan="$PWD/gistan"
+
+# 1. init into a throwaway location (local repo only, no remote; idempotent — run it twice)
+gistan init ~/tmp/gistan-e2e
+
+# 2. create a snippet, check status
+echo '# hello gistan' > ~/tmp/gistan-e2e/snippets/hello.md
+gistan status                      # → unpublished
+
+# 3. publish as secret first (no public noise while testing)
+gistan publish hello.md --secret   # prints the gist URL, copies it to the clipboard
+gistan status                      # → published (secret) + URL
+
+# 4. idempotency and update
+gistan publish hello.md            # → already up to date (no API call)
+echo 'edited' >> ~/tmp/gistan-e2e/snippets/hello.md
+gistan status                      # → local-drift
+gistan publish hello.md            # → updated
+
+# 5. remote drift: edit the gist on gist.github.com in a browser, then
+gistan status --remote             # → remote-drift (takes seconds: full gist list fetch)
+
+# 6. visibility change (confirm prompt; the URL changes)
+gistan publish hello.md --public
+
+# 7. live search (interactive; empty query lists files, typing greps; Esc leaves)
+gistan hello                       # same as `gistan search hello`
+
+# 8. import a small real batch first, inspect, then go all in
+gistan import --limit 5
+gistan status
+gistan import                      # full run + gitleaks scan at the end
+
+# cleanup: delete the test gist and the local fixture
+gh api gists/<id> --method DELETE
+rm -rf ~/tmp/gistan-e2e ~/.config/gistan
+```

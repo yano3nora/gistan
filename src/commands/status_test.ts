@@ -71,17 +71,36 @@ const remoteOk: Runner = (cmd, args) => {
   return Promise.resolve({ code: 0, stdout: "", stderr: "" });
 };
 
-Deno.test("status classifies snippets and prints a summary", async () => {
+Deno.test("status --remote classifies snippets and prints a summary", async () => {
   const home = await makeFixture();
   const io = memoryContext(remoteOk, home);
 
-  assertEquals(await run({ name: "status", args: [] }, io.context), 0);
+  assertEquals(await run({ name: "status", args: ["--remote"] }, io.context), 0);
   assertEquals(io.stdout.includes("in-sync (public)"), true);
   assertEquals(io.stdout.includes("https://gist.github.com/g1"), true);
   assertEquals(io.stdout.includes("local-drift"), true);
   assertEquals(io.stdout.includes("unpublished"), true);
   assertEquals(io.stdout.includes("file-missing"), true);
   assertEquals(io.stdout.includes("4 snippet(s):"), true);
+  assertEquals(io.stdout.includes("snippets/"), false); // structural prefix hidden
+});
+
+Deno.test("status is local-only by default: fast, no API call", async () => {
+  const home = await makeFixture();
+  const ghCalls: string[] = [];
+  const recording: Runner = (cmd, args, options) => {
+    if (cmd === "gh") {
+      ghCalls.push(args.join(" "));
+    }
+    return remoteOk(cmd, args, options);
+  };
+  const io = memoryContext(recording, home);
+
+  assertEquals(await run({ name: "status", args: [] }, io.context), 0);
+  assertEquals(ghCalls, []); // never touches the network without --remote
+  assertEquals(io.stdout.includes("published (public)"), true); // a.md, unchanged
+  assertEquals(io.stdout.includes("local-drift"), true); // b.md, judged locally
+  assertEquals(io.stdout.includes("add --remote"), true); // hint
 });
 
 Deno.test("status filters by bare filename", async () => {
@@ -89,18 +108,18 @@ Deno.test("status filters by bare filename", async () => {
   const io = memoryContext(remoteOk, home);
 
   assertEquals(await run({ name: "status", args: ["c.md"] }, io.context), 0);
-  assertEquals(io.stdout.includes("snippets/c.md"), true);
-  assertEquals(io.stdout.includes("snippets/a.md"), false);
+  assertEquals(io.stdout.includes("c.md"), true);
+  assertEquals(io.stdout.includes("a.md"), false);
 });
 
-Deno.test("status degrades to local-only judgement when gh fails", async () => {
+Deno.test("status --remote degrades to local judgement when gh fails", async () => {
   const home = await makeFixture();
   const failing: Runner = () => Promise.resolve({ code: 1, stdout: "", stderr: "boom" });
   const io = memoryContext(failing, home);
 
-  assertEquals(await run({ name: "status", args: [] }, io.context), 0);
+  assertEquals(await run({ name: "status", args: ["--remote"] }, io.context), 0);
   assertEquals(io.stderr.includes("remote check skipped"), true);
-  assertEquals(io.stdout.includes("remote-unknown"), true); // a.md: no local change
+  assertEquals(io.stdout.includes("published (public)"), true); // a.md: no local change
   assertEquals(io.stdout.includes("local-drift"), true); // b.md: judged without remote
 });
 
