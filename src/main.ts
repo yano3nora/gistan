@@ -15,7 +15,7 @@ import type { CommandContext, CommandHandler, CommandName } from "./commands/typ
 import { writeText } from "./commands/types.ts";
 import { defaultConfigPath } from "./core/config.ts";
 import { systemRunner } from "./core/proc.ts";
-export const VERSION = "gistan 0.3.0";
+export const VERSION = "gistan 0.4.0";
 export const COMMAND_DESCRIPTIONS: Record<CommandName, string> = {
   new: "Create a file under gists/<dir>/.",
   search: "Document-unit search across gists and stars.",
