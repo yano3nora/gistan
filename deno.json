@@ -1,9 +1,9 @@
 {
   "tasks": {
-    "check": "deno fmt --check src deno.json README.md && deno lint src && deno check src/*.ts src/core/*.ts src/commands/*.ts",
+    "check": "deno fmt --check src scripts deno.json README.md && deno lint src scripts && deno check src/*.ts src/core/*.ts src/commands/*.ts scripts/*.ts",
     "test": "deno test --allow-read --allow-write --allow-env",
-    "fmt": "deno fmt src deno.json README.md",
-    "lint": "deno lint src",
+    "fmt": "deno fmt src scripts deno.json README.md",
+    "lint": "deno lint src scripts",
     "compile": "deno compile --allow-env --allow-read --allow-write --allow-run --output gistan src/main.ts"
   },
   "fmt": {
