@@ -1,9 +1,6 @@
-import { assertEquals } from "@std/assert";
-import { join } from "@std/path";
-import { saveConfig } from "../core/config.ts";
-import type { Runner, RunOptions } from "../core/proc.ts";
-import { EXIT_COMMAND_NOT_FOUND } from "../core/proc.ts";
-import { memoryContext } from "../testing.ts";
+import { assert, assertEquals } from "@std/assert";
+import { EXIT_COMMAND_NOT_FOUND, type Runner, type RunOptions } from "../core/proc.ts";
+import { fixture, join, memoryContext } from "./test_helpers.ts";
 import { run } from "./search.ts";
 
 interface Call {
@@ -24,17 +21,9 @@ function searchRunner(fzf: { code: number; stdout: string }): { runner: Runner; 
   return { runner, calls };
 }
 
-async function fixture() {
-  const home = await Deno.makeTempDir();
-  const repo = join(home, "repo");
-  await Deno.mkdir(repo, { recursive: true });
-  await saveConfig(join(home, "config.toml"), { repo });
-  return home;
-}
-
 Deno.test("search opens the picked snippet at its line in a vim-family editor", async () => {
-  const home = await fixture();
-  const { runner, calls } = searchRunner({ code: 0, stdout: "snippets/a.md:12:3:hit\n" });
+  const { home } = await fixture();
+  const { runner, calls } = searchRunner({ code: 0, stdout: "gists/a/a.md:12:3:hit\n" });
   const io = memoryContext(runner, home, { editor: "vim" });
 
   assertEquals(await run({ name: "search", args: ["react"] }, io.context), 0);
@@ -43,22 +32,22 @@ Deno.test("search opens the picked snippet at its line in a vim-family editor", 
   const fzf = calls.find((call) => call.cmd === "fzf" && call.args.includes("--disabled"));
   assertEquals(fzf?.args.includes("react"), true); // initial --query
   const editor = calls.find((call) => call.cmd === "vim");
-  assertEquals(editor?.args, ["+12", "snippets/a.md"]);
+  assertEquals(editor?.args, ["+12", "gists/a/a.md"]);
   assertEquals(editor?.options?.interactive, true);
 });
 
 Deno.test("a file-list pick (no line part) opens without a line jump", async () => {
-  const home = await fixture();
-  const { runner, calls } = searchRunner({ code: 0, stdout: "snippets/a.md\n" });
+  const { home } = await fixture();
+  const { runner, calls } = searchRunner({ code: 0, stdout: "gists/a/a.md\n" });
   const io = memoryContext(runner, home, { editor: "vim" });
 
   assertEquals(await run({ name: "search", args: [] }, io.context), 0);
   const editor = calls.find((call) => call.cmd === "vim");
-  assertEquals(editor?.args, ["snippets/a.md"]);
+  assertEquals(editor?.args, ["gists/a/a.md"]);
 });
 
 Deno.test("search opens stars matches read-only", async () => {
-  const home = await fixture();
+  const { home } = await fixture();
   const { runner, calls } = searchRunner({ code: 0, stdout: "stars/octo/g1/note.md:1:1:x\n" });
   const io = memoryContext(runner, home, { editor: "vim" });
 
@@ -68,17 +57,17 @@ Deno.test("search opens stars matches read-only", async () => {
 });
 
 Deno.test("search passes only the file to a non-vim editor", async () => {
-  const home = await fixture();
-  const { runner, calls } = searchRunner({ code: 0, stdout: "snippets/a.md:12:3:hit\n" });
+  const { home } = await fixture();
+  const { runner, calls } = searchRunner({ code: 0, stdout: "gists/a/a.md:12:3:hit\n" });
   const io = memoryContext(runner, home, { editor: "code" });
 
   assertEquals(await run({ name: "search", args: [] }, io.context), 0);
   const editor = calls.find((call) => call.cmd === "code");
-  assertEquals(editor?.args, ["snippets/a.md"]);
+  assertEquals(editor?.args, ["gists/a/a.md"]);
 });
 
 Deno.test("an aborted fzf session is not an error and opens nothing", async () => {
-  const home = await fixture();
+  const { home } = await fixture();
   const { runner, calls } = searchRunner({ code: 130, stdout: "" });
   const io = memoryContext(runner, home, { editor: "vim" });
 
@@ -87,7 +76,7 @@ Deno.test("an aborted fzf session is not an error and opens nothing", async () =
 });
 
 Deno.test("search requires rg and fzf", async () => {
-  const home = await fixture();
+  const { home } = await fixture();
   const runner: Runner = (cmd) =>
     Promise.resolve(
       cmd === "fzf"
@@ -97,7 +86,7 @@ Deno.test("search requires rg and fzf", async () => {
   const io = memoryContext(runner, home);
 
   assertEquals(await run({ name: "search", args: [] }, io.context), 1);
-  assertEquals(io.stderr.includes("fzf is required for search"), true);
+  assert(io.stderr.includes("fzf is required for search"));
 });
 
 Deno.test("search requires init to have run", async () => {
@@ -106,5 +95,26 @@ Deno.test("search requires init to have run", async () => {
   const io = memoryContext(runner, home);
 
   assertEquals(await run({ name: "search", args: [] }, io.context), 1);
-  assertEquals(io.stderr.includes("gistan init"), true);
+  assert(io.stderr.includes("gistan root init"));
+});
+
+// -- --path / -p: print the resolved path instead of opening an editor -----
+
+Deno.test("search --path prints the resolved absolute path and opens no editor", async () => {
+  const { home, repo } = await fixture();
+  const { runner, calls } = searchRunner({ code: 0, stdout: "gists/a/a.md:12:3:hit\n" });
+  const io = memoryContext(runner, home, { editor: "vim" });
+
+  assertEquals(await run({ name: "search", args: ["--path"] }, io.context), 0);
+  assertEquals(io.stdout, `${join(repo, "gists", "a", "a.md")}\n`);
+  assertEquals(calls.some((call) => call.cmd === "vim"), false);
+});
+
+Deno.test("search -p is an alias for --path", async () => {
+  const { home, repo } = await fixture();
+  const { runner } = searchRunner({ code: 0, stdout: "gists/a/a.md:12:3:hit\n" });
+  const io = memoryContext(runner, home, { editor: "vim" });
+
+  assertEquals(await run({ name: "search", args: ["-p"] }, io.context), 0);
+  assertEquals(io.stdout, `${join(repo, "gists", "a", "a.md")}\n`);
 });

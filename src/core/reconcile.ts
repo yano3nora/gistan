@@ -1,77 +1,63 @@
-import type { SnippetEntry, State } from "./state.ts";
+import type { GistIndexEntry, State } from "./state.ts";
+import type { LocalGistDir } from "./snippets.ts";
 
-export type SnippetCondition =
-  | "unpublished" // file exists but has no gist link (tracked or not)
-  | "in-sync" // published; neither side changed since last sync
-  | "local-drift" // published; the local file changed
-  | "remote-drift" // published; the gist changed upstream (edited elsewhere)
-  | "conflict" // published; both sides changed — a human must pick a side
-  | "remote-deleted" // published, but the gist no longer exists upstream
-  | "remote-unknown" // published, no local changes, remote could not be checked
-  | "file-missing"; // index entry remains but the file is gone (orphan candidate)
+export type GistCondition =
+  | "unpublished"
+  | "in-sync"
+  | "local-drift"
+  | "remote-drift"
+  | "conflict"
+  | "remote-deleted"
+  | "remote-unknown"
+  | "dir-missing";
 
 export interface RemoteInfo {
   readonly updated_at: string;
 }
 
 export interface ReconcileItem {
-  readonly path: string;
-  readonly condition: SnippetCondition;
-  readonly entry?: SnippetEntry;
-  readonly localHash?: string;
+  readonly dirname: string;
+  readonly condition: GistCondition;
+  readonly entry?: GistIndexEntry;
+  readonly local?: LocalGistDir;
 }
 
-/**
- * The single source of drift judgement shared by status / pull / doctor
- * (SPEC-0001: those commands must never disagree). Pure function: takes the
- * scanned files, the committed index, and optionally the live remote gist
- * list — it never touches fs or network itself.
- *
- * `remote === undefined` means "remote was not checked" (offline / gh failed);
- * published snippets then degrade to local-only judgement.
- */
 export function reconcile(
-  files: ReadonlyMap<string, string>,
+  local: ReadonlyMap<string, LocalGistDir>,
   state: State,
   remote?: ReadonlyMap<string, RemoteInfo>,
 ): ReconcileItem[] {
-  const paths = new Set([...files.keys(), ...Object.keys(state.snippets)]);
-  return [...paths].sort().map((path) => {
-    const entry = state.snippets[path];
-    const localHash = files.get(path);
-    return { path, condition: classify(entry, localHash, remote), entry, localHash };
+  const names = new Set([...local.keys(), ...Object.keys(state.gists)]);
+  return [...names].sort().map((dirname) => {
+    const entry = state.gists[dirname];
+    const dir = local.get(dirname);
+    return { dirname, condition: classify(entry, dir, remote), entry, local: dir };
   });
 }
 
 function classify(
-  entry: SnippetEntry | undefined,
-  localHash: string | undefined,
+  entry: GistIndexEntry | undefined,
+  dir: LocalGistDir | undefined,
   remote: ReadonlyMap<string, RemoteInfo> | undefined,
-): SnippetCondition {
-  if (localHash === undefined) {
-    // The path came from the index, so an entry exists but the file does not.
-    return "file-missing";
-  }
-  if (!entry?.gist) {
-    return "unpublished";
-  }
-  const localDrift = localHash !== entry.gist.synced_hash;
-  if (remote === undefined) {
-    return localDrift ? "local-drift" : "remote-unknown";
-  }
-  const live = remote.get(entry.gist.id);
-  if (live === undefined) {
-    return "remote-deleted";
-  }
-  const remoteDrift = live.updated_at !== entry.gist.remote_updated_at;
-  if (localDrift && remoteDrift) {
-    return "conflict";
-  }
-  if (localDrift) {
-    return "local-drift";
-  }
-  if (remoteDrift) {
-    return "remote-drift";
-  }
+): GistCondition {
+  if (!entry && dir) return "unpublished";
+  if (entry && !dir) return "dir-missing";
+  if (!entry || !dir) return "unpublished";
+
+  const localDrift = entry.synced_description_hash !== dir.descriptionHash ||
+    JSON.stringify(sortRecord(entry.files)) !== JSON.stringify(sortRecord(dir.files));
+  if (remote === undefined) return localDrift ? "local-drift" : "remote-unknown";
+  const live = remote.get(entry.id);
+  if (!live) return "remote-deleted";
+  const remoteDrift = live.updated_at !== entry.remote_updated_at;
+  if (localDrift && remoteDrift) return "conflict";
+  if (localDrift) return "local-drift";
+  if (remoteDrift) return "remote-drift";
   return "in-sync";
+}
+
+function sortRecord(record: Readonly<Record<string, string>>): Record<string, string> {
+  const sorted: Record<string, string> = {};
+  for (const key of Object.keys(record).sort()) sorted[key] = record[key];
+  return sorted;
 }

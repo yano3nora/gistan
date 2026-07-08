@@ -1,7 +1,6 @@
 import type { Runner } from "../core/proc.ts";
 
 export type CommandName =
-  | "init"
   | "new"
   | "search"
   | "edit"
@@ -11,9 +10,7 @@ export type CommandName =
   | "unpublish"
   | "pull"
   | "status"
-  | "doctor"
   | "import"
-  | "sync"
   | "root";
 
 export interface CommandContext {

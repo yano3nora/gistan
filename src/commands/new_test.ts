@@ -1,44 +1,54 @@
-import { assertEquals } from "@std/assert";
-import { join } from "@std/path";
-import { saveConfig } from "../core/config.ts";
-import { loadState } from "../core/state.ts";
-import { memoryContext } from "../testing.ts";
+import { assert, assertEquals } from "@std/assert";
+import { fixture, join, memoryContext } from "./test_helpers.ts";
 import { run } from "./new.ts";
 
-async function fixture() {
-  const home = await Deno.makeTempDir();
-  const repo = join(home, "repo");
-  await Deno.mkdir(join(repo, "snippets"), { recursive: true });
-  await Deno.mkdir(join(repo, ".gistan"), { recursive: true });
-  await saveConfig(join(home, "config.toml"), { repo });
-  return { home, repo };
-}
-
-const ok = () => Promise.resolve({ code: 0, stdout: "", stderr: "" });
-
-Deno.test("new creates an md from the template, registers tags, opens the editor", async () => {
+Deno.test("new filename creates stem directory and markdown template", async () => {
   const { home, repo } = await fixture();
-  const io = memoryContext(ok, home, { editor: "vim" });
-
-  assertEquals(
-    await run({ name: "new", args: ["--tags", "react,example", "note.md"] }, io.context),
-    0,
-  );
-  // No custom template in the fixture — the fallback applies with {{title}} replaced.
-  assertEquals(await Deno.readTextFile(join(repo, "snippets", "note.md")), "# note\n");
-  const state = await loadState(repo);
-  assertEquals(state.snippets["snippets/note.md"], { tags: ["react", "example"], gist: null });
+  const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home);
+  assertEquals(await run({ name: "new", args: ["note.md"] }, io.context), 0);
+  assertEquals(await Deno.readTextFile(join(repo, "gists", "note", "note.md")), "# note\n");
 });
 
-Deno.test("new refuses duplicates and directory paths", async () => {
+Deno.test("new dirname/file creates file inside explicit dir", async () => {
   const { home, repo } = await fixture();
-  await Deno.writeTextFile(join(repo, "snippets", "dup.md"), "x");
-  const io = memoryContext(ok, home);
+  const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home);
+  assertEquals(await run({ name: "new", args: ["memo/a.txt"] }, io.context), 0);
+  assertEquals(await Deno.readTextFile(join(repo, "gists", "memo", "a.txt")), "");
+});
 
-  assertEquals(await run({ name: "new", args: ["dup.md"] }, io.context), 1);
-  assertEquals(io.stderr.includes("already exists"), true);
+Deno.test("new -d writes reserved description metadata", async () => {
+  const { home, repo } = await fixture();
+  const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home);
+  assertEquals(await run({ name: "new", args: ["-d", "Desc", "note.md"] }, io.context), 0);
+  assertEquals(await Deno.readTextFile(join(repo, "gists", "note", ".description.txt")), "Desc");
+});
 
-  const io2 = memoryContext(ok, home);
-  assertEquals(await run({ name: "new", args: ["sub/dir.md"] }, io2.context), 2);
-  assertEquals(io2.stderr.includes("flat"), true);
+Deno.test("new warns when creating reserved filename", async () => {
+  const { home } = await fixture();
+  const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home);
+  assertEquals(await run({ name: "new", args: ["one/.description.txt"] }, io.context), 0);
+  assert(io.stderr.includes("reserved"));
+});
+
+Deno.test("new refuses existing file", async () => {
+  const { home, repo } = await fixture();
+  await Deno.mkdir(join(repo, "gists", "note"), { recursive: true });
+  await Deno.writeTextFile(join(repo, "gists", "note", "note.md"), "old");
+  const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home);
+  assertEquals(await run({ name: "new", args: ["note.md"] }, io.context), 1);
+});
+
+Deno.test("new uses custom default template", async () => {
+  const { home, repo } = await fixture();
+  await Deno.mkdir(join(repo, ".gistan", "templates"), { recursive: true });
+  await Deno.writeTextFile(join(repo, ".gistan", "templates", "default.md"), "Title {{title}}");
+  const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home);
+  assertEquals(await run({ name: "new", args: ["abc.md"] }, io.context), 0);
+  assertEquals(await Deno.readTextFile(join(repo, "gists", "abc", "abc.md")), "Title abc");
+});
+
+Deno.test("new without arg returns usage", async () => {
+  const { home } = await fixture();
+  const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home);
+  assertEquals(await run({ name: "new", args: [] }, io.context), 2);
 });

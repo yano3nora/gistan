@@ -1,141 +1,62 @@
 gistan
 ===
 
-A Deno + TypeScript CLI for managing a repo-backed collection of gist snippets. The local gist repo
-is the source of truth; gists are only the explicit publish surface.
+A Deno + TypeScript CLI for managing a repo-backed gist collection. The local repo is the source of truth; GitHub Gist is only the explicit publish surface.
 
-## Getting Started
-### Install with mise
-```sh
-# Latest release.
-mise use -g github:yano3nora/gistan
-
-# Pinned release.
-mise use -g github:yano3nora/gistan@0.1.0
-
-gistan --version
-```
-
-Release assets should use conventional OS/arch names so mise can auto-detect the right one:
+## Layout
 
 ```text
-gistan-v0.1.0-linux-x64.tar.gz
-gistan-v0.1.0-linux-arm64.tar.gz
-gistan-v0.1.0-macos-x64.tar.gz
-gistan-v0.1.0-macos-arm64.tar.gz
-gistan-v0.1.0-windows-x64.zip
+<gist-repo>/
+├ gists/<dirname>/<files...>   # 1 directory = 1 gist
+├ stars/                       # read-only cache
+└ .gistan/state.json           # index v2
 ```
 
-The archive should contain `gistan` at the archive root (`gistan.exe` for Windows). If you want the
-shorter `mise use -g gistan` form, `gistan` must also be registered in the upstream mise registry or
-defined as a local tool alias.
+`gists/<dirname>/.description.txt` is reserved metadata. Its trimmed content becomes the gist description, but it is **never uploaded as a gist file**. Multi-line descriptions are sent as-is; GitHub UI rendering is your responsibility. A remote gist containing a real `.description.txt` file is skipped on import.
 
-### Usage
-Prerequisites: `gh` authenticated with the gist scope (`gh auth refresh -s gist`), `rg`, `fzf`, and
-`gitleaks` (`brew install gitleaks`) installed.
+## Usage
+
+Prerequisites: `gh` authenticated with gist scope, plus `rg`, `fzf`, and `gitleaks`.
 
 ```sh
-# 0. init into a throwaway location (local git repo)
-gistan init ~/gistan-repo          # mkdir + git init
+gistan root init ~/gistan-repo     # scaffold the gist repo (was: gistan init)
 
-# 1. at first, import gists, then commit repo
-gistan import                      # full run + gitleaks scan at the end
-gistan sync                        # commit (+ pull/push only when a remote exists)
+gistan import                      # import existing gists + gitleaks scan
+gistan new -d "demo description" hello.md
+gistan new tools/helper.ts         # adds gists/tools/helper.ts
+gistan search hello
+gistan list
 
-# 2. create and search snippets
-gistan new --tags demo,md hello.md # with $EDITOR
-gistan list --tag demo             # list snippets with demo tag
-gistan search hello                # live search
-gistan hello                       # same as `gistan search hello`
+gistan publish hello               # publishes gists/hello as one gist (secret by default)
+gistan publish hello --public      # public must be an explicit opt-in
+gistan status                      # offline local view
+gistan status --remote             # includes remote drift
+gistan pull hello                  # overwrite local dir from remote after confirmation on conflict
+gistan status --fix                # old doctor-equivalent repair flow
 
-# 3. publish as secret gist
-gistan publish hello.md --secret   # prints the gist URL, copies it to the clipboard
-gistan status                      # → published (secret) + URL
+gistan unpublish hello             # delete remote gist, keep local dir
+gistan rm hello/hello.md           # delete one file; asks if it is the last file
+```
 
-# 4. update gist
-gistan publish hello.md            # → already up to date (no API call)
-gistan edit hello2                 # fuzzy pick → $EDITOR
-gistan status                      # → local-drift
-gistan publish hello.md            # → updated
-gistan publish hello.md --public   # visibility change (confirm prompt; the URL changes)
+Daily operations above never touch the repo's own git history — they only read/write files and talk to `gist.github.com` via `gh`. Setup and origin git housekeeping (pushing/pulling the notes repo itself, not gists) live under `gistan root` instead, since conflating the two was confusing (`gistan sync` is gone):
 
-# 5. remove snippet / gist
-gistan unpublish hello.md          # deletes the gist, keeps the file
-gistan rm hello.md                 # confirmed delete (asks about the gist too)
-
-# 6. fetch remote drift: edit the gist on gist.github.com in a browser, then
-gistan status --remote             # → remote-drift (takes seconds: full gist list fetch)
-gistan pull                        # after editing a gist in the browser: takes it in
-
-# 7. maintenance
-gistan doctor                      # after rm-ing a file or a gist by hand
+```sh
+gistan root path                   # print the repo's absolute path, e.g. cd $(gistan root path)
+gistan root commit -m "notes"      # git add -A + commit (omit -m for an auto message)
+gistan root push                   # git push
+gistan root pull                   # git pull --rebase
 ```
 
 ## Development
-### Depends
-- mise 2026+
-- Deno 2.9.1
-
-### Structure
-```text
-.
-├ deno.json       … Deno tasks, formatter/linter settings, imports
-├ src/
-│  ├ main.ts      … CLI entrypoint and subcommand dispatch
-│  ├ main_test.ts … Dispatch-focused unit tests
-│  ├ commands/    … one module per subcommand (+ shared helpers)
-│  └ core/        … config / index / reconcile engine / gh adapter
-├ docs/           … ADR / SPEC / TASK documents
-├ scripts/        … development scripts
-└ mise.toml       … Toolchain pinning
-```
-
-### Commands
-```sh
-mise install
-mise exec -- deno --version
-
-# format / lint / type-check
-mise exec -- deno task check
-
-# run unit tests
-mise exec -- deno task test
-
-# format or lint individually
-mise exec -- deno task fmt
-mise exec -- deno task lint
-
-# build the local single-file binary: ./gistan
-mise exec -- deno task compile
-
-# install for test
-deno install --global -f -A --name dev:gistan src/main.ts
-```
-
-`gistan` is generated by `deno compile` and is ignored by git. See `docs/SPEC-0001-gistan-cli.md`
-for the spec and `docs/ADR-0001-*.md` for design decisions.
-
-## Deployment
-gistan ships as a single self-contained binary (`deno compile` embeds the runtime, ~80MB). Nothing
-on the target machine needs Deno, but runtime integrations still require external CLIs: `gh`
-(authenticated, gist scope), `git`, `rg` + `fzf` (search/edit/rm picks), and `gitleaks` (import
-only).
 
 ```sh
-# 1. Bump VERSION, run check/test, and build all release assets.
-mise run release:prepare -- 0.1.0
-
-# 2. Review the diff, then commit the version bump yourself.
-# git diff
-# git add src/main.ts
-# git commit -m "Release v0.1.0"
-
-# 3. Human-only publishing step. This tags, pushes the tag, and creates the GitHub Release.
-mise run release:publish -- 0.1.0 --i-understand-this-pushes-and-publishes
+deno task check
+deno task test
+deno task compile
 ```
 
-`release:publish` refuses to run unless the working tree is clean, so the tag points at a committed
-version bump instead of an uncommitted local edit.
+Important rules:
 
-New machine checklist: clone this repo → `mise install` → build & copy the binary → clone your notes
-repo yourself → `gistan init <notes-repo-dir>`.
+- GitHub API access goes through `gh api` subprocesses only.
+- `status` / `pull` / `publish` drift judgment must share `src/core/reconcile.ts`.
+- Do not commit, push, create releases, or publish packages from the agent; humans decide external publication.

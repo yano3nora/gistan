@@ -8,14 +8,14 @@ import { writeText } from "./types.ts";
 export async function requireConfig(context: CommandContext): Promise<Config | undefined> {
   const config = await loadConfig(context.configPath);
   if (config === undefined) {
-    await writeText(context.stderr, "error: gistan is not initialized — run `gistan init`\n");
+    await writeText(context.stderr, "error: gistan is not initialized — run `gistan root init`\n");
   }
   return config;
 }
 
 /** CLI args accept bare filenames; the index always keys on repo-relative paths. */
 export function toRelPath(arg: string): string {
-  return arg.startsWith("snippets/") || arg.startsWith("stars/") ? arg : `snippets/${arg}`;
+  return arg.startsWith("gists/") || arg.startsWith("stars/") ? arg : `gists/${arg}`;
 }
 
 export async function exists(path: string): Promise<boolean> {
@@ -34,7 +34,7 @@ export async function exists(path: string): Promise<boolean> {
 export const FZF_NO_MATCH = 1;
 export const FZF_ABORTED = 130;
 
-const LIST_CMD = "rg --files --no-ignore snippets stars";
+const LIST_CMD = "rg --files --no-ignore gists stars";
 
 /** Fuzzy file pick; path === undefined means the user left without choosing. */
 export async function pickFile(

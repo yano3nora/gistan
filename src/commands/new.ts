@@ -1,6 +1,6 @@
 import { parseArgs } from "@std/cli/parse-args";
-import { join } from "@std/path";
-import { loadState, saveState } from "../core/state.ts";
+import { basename, dirname, join } from "@std/path";
+import { DESCRIPTION_FILE } from "../core/snippets.ts";
 import { exists, openEditor, requireConfig } from "./shared.ts";
 import type { CommandArgs, CommandContext } from "./types.ts";
 import { writeText } from "./types.ts";
@@ -10,55 +10,46 @@ const FALLBACK_TEMPLATE = "# {{title}}\n";
 export async function run(command: CommandArgs, context: CommandContext): Promise<number> {
   const out = (text: string) => writeText(context.stdout, text);
   const err = (text: string) => writeText(context.stderr, text);
-
-  const flags = parseArgs([...command.args], { string: ["tags"] });
-  const filename = flags._.map(String).at(0);
-  if (filename === undefined) {
-    await err("usage: gistan new [--tags <t1,t2>] <filename>\n");
-    return 2;
-  }
-  if (filename.includes("/")) {
-    // Flat structure is enforced only here, at the creation funnel (SPEC-0001).
-    await err("error: snippets are flat — pass a filename without directories\n");
-    return 2;
-  }
-
-  const config = await requireConfig(context);
-  if (config === undefined) {
-    return 1;
-  }
-
-  const relPath = `snippets/${filename}`;
-  if (await exists(join(config.repo, relPath))) {
-    await err(`error: ${filename} already exists — try: gistan edit ${filename}\n`);
-    return 1;
-  }
-
-  const tags = (flags.tags ?? "")
-    .split(",")
-    .map((tag) => tag.trim())
-    .filter((tag) => tag !== "");
-  const content = filename.endsWith(".md") ? await renderTemplate(config.repo, filename) : "";
-  await Deno.writeTextFile(join(config.repo, relPath), content);
-
-  const state = await loadState(config.repo);
-  await saveState(config.repo, {
-    version: 1,
-    snippets: { ...state.snippets, [relPath]: { tags, gist: null } },
+  const flags = parseArgs([...command.args], {
+    string: ["d", "description"],
+    alias: { d: "description" },
   });
-
-  await out(`ok: created ${relPath}\n`);
-  return await openEditor(context, config.repo, relPath);
+  const arg = flags._.map(String).at(0);
+  if (!arg) {
+    await err("usage: gistan new [-d <desc>] <filename|dirname/filename>\n");
+    return 2;
+  }
+  if (basename(arg) === DESCRIPTION_FILE) {
+    await err(`warn: ${DESCRIPTION_FILE} is reserved for gist description and is never uploaded\n`);
+  }
+  const config = await requireConfig(context);
+  if (!config) return 1;
+  const dir = arg.includes("/") ? dirname(arg) : basename(arg).replace(/\.[^.]+$/, "");
+  const file = basename(arg);
+  const rel = `gists/${dir}/${file}`;
+  if (await exists(join(config.repo, rel))) {
+    await err(`error: ${rel} already exists\n`);
+    return 1;
+  }
+  await Deno.mkdir(join(config.repo, "gists", dir), { recursive: true });
+  const content = file.endsWith(".md") ? await renderTemplate(config.repo, file) : "";
+  await Deno.writeTextFile(join(config.repo, rel), content);
+  if (flags.description !== undefined) {
+    await Deno.writeTextFile(
+      join(config.repo, "gists", dir, DESCRIPTION_FILE),
+      String(flags.description),
+    );
+  }
+  await out(`ok: created ${rel}\n`);
+  return await openEditor(context, config.repo, rel);
 }
 
 async function renderTemplate(repo: string, filename: string): Promise<string> {
   let template = FALLBACK_TEMPLATE;
   try {
     template = await Deno.readTextFile(join(repo, ".gistan", "templates", "default.md"));
-  } catch (error) {
-    if (!(error instanceof Deno.errors.NotFound)) {
-      throw error;
-    }
+  } catch (e) {
+    if (!(e instanceof Deno.errors.NotFound)) throw e;
   }
   return template.replaceAll("{{title}}", filename.replace(/\.md$/, ""));
 }

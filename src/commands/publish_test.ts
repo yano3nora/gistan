@@ -1,169 +1,164 @@
-import { assertEquals } from "@std/assert";
-import { join } from "@std/path";
-import { saveConfig } from "../core/config.ts";
+import { assert, assertEquals } from "@std/assert";
 import type { Runner } from "../core/proc.ts";
-import { contentHash } from "../core/snippets.ts";
-import type { SnippetEntry } from "../core/state.ts";
 import { loadState, saveState } from "../core/state.ts";
-import { memoryContext } from "../testing.ts";
+import { AT, AT2, fixture, join, memoryContext } from "./test_helpers.ts";
 import { run } from "./publish.ts";
 
-interface Call {
-  cmd: string;
-  args: readonly string[];
-  stdin?: string;
+async function oneFile() {
+  const f = await fixture();
+  await Deno.mkdir(join(f.repo, "gists", "one"), { recursive: true });
+  await Deno.writeTextFile(join(f.repo, "gists", "one", "a.md"), "A");
+  return f;
 }
 
-function ghRunner(): { runner: Runner; calls: Call[] } {
-  const calls: Call[] = [];
-  const runner: Runner = (cmd, args, options) => {
-    calls.push({ cmd, args, stdin: options?.stdin });
-    if (cmd === "gh" && args[1] === "gists" && args.includes("POST")) {
-      return Promise.resolve({ code: 0, stdout: "newid\t2026-03-01T00:00:00Z\n", stderr: "" });
+Deno.test("publish create excludes .description.txt from gist files", async () => {
+  const { home, repo } = await oneFile();
+  await Deno.writeTextFile(join(repo, "gists", "one", ".description.txt"), "Desc\n");
+  let body = "";
+  const runner: Runner = (_c, args, opt) => {
+    if (args.includes("POST")) {
+      body = String(opt?.stdin);
+      return Promise.resolve({ code: 0, stdout: `gid\t${AT}`, stderr: "" });
     }
-    if (cmd === "gh" && (args[1] ?? "").startsWith("gists/") && args.includes("PATCH")) {
-      return Promise.resolve({ code: 0, stdout: "2026-03-02T00:00:00Z\n", stderr: "" });
+    return Promise.resolve({ code: 127, stdout: "", stderr: "" });
+  };
+  const io = memoryContext(runner, home, { confirmAnswer: true });
+  assertEquals(await run({ name: "publish", args: ["one"] }, io.context), 0);
+  const payload = JSON.parse(body);
+  assertEquals(payload.description, "Desc");
+  assertEquals(Object.keys(payload.files), ["a.md"]);
+  assert(!(".description.txt" in payload.files));
+  // Creating public must be an explicit opt-in (--public); default is secret.
+  assertEquals(payload.public, false);
+});
+
+Deno.test("publish update sends changed files and deleted files as null", async () => {
+  const { home, repo } = await oneFile();
+  await Deno.writeTextFile(join(repo, "gists", "one", "a.md"), "A2");
+  await saveState(repo, {
+    version: 2,
+    gists: {
+      one: {
+        id: "gid",
+        visibility: "public",
+        remote_updated_at: AT,
+        synced_description_hash: null,
+        files: { "a.md": "old", "b.md": "old" },
+      },
+    },
+  });
+  let body = "";
+  const runner: Runner = (_c, args, opt) => {
+    if (args.includes("PATCH")) {
+      body = String(opt?.stdin);
+      return Promise.resolve({ code: 0, stdout: AT2, stderr: "" });
+    }
+    return Promise.resolve({ code: 127, stdout: "", stderr: "" });
+  };
+  const io = memoryContext(runner, home, { confirmAnswer: true });
+  assertEquals(await run({ name: "publish", args: ["one"] }, io.context), 0);
+  const payload = JSON.parse(body);
+  assertEquals(payload.files["b.md"], null);
+  assert("a.md" in payload.files);
+  assertEquals((await loadState(repo)).gists.one.remote_updated_at, AT2);
+});
+
+Deno.test("publish clears remote description when description file is removed", async () => {
+  const { home, repo } = await oneFile();
+  await saveState(repo, {
+    version: 2,
+    gists: {
+      one: {
+        id: "gid",
+        visibility: "public",
+        remote_updated_at: AT,
+        synced_description_hash: "sha256:old",
+        files: { "a.md": "old" },
+      },
+    },
+  });
+  let body = "";
+  const runner: Runner = (_c, args, opt) => {
+    if (args.includes("PATCH")) {
+      body = String(opt?.stdin);
+      return Promise.resolve({ code: 0, stdout: AT2, stderr: "" });
+    }
+    return Promise.resolve({ code: 127, stdout: "", stderr: "" });
+  };
+  const io = memoryContext(runner, home, { confirmAnswer: true });
+  assertEquals(await run({ name: "publish", args: ["one"] }, io.context), 0);
+  assertEquals(JSON.parse(body).description, "");
+  assertEquals((await loadState(repo)).gists.one.synced_description_hash, null);
+});
+
+Deno.test("publish refuses directory with only reserved description", async () => {
+  const { home, repo } = await fixture();
+  await Deno.mkdir(join(repo, "gists", "one"), { recursive: true });
+  await Deno.writeTextFile(join(repo, "gists", "one", ".description.txt"), "Desc");
+  const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home);
+  assertEquals(await run({ name: "publish", args: ["one"] }, io.context), 1);
+  assert(io.stderr.includes("no publishable files"));
+});
+
+Deno.test("publish refuses nested files", async () => {
+  const { home, repo } = await oneFile();
+  await Deno.mkdir(join(repo, "gists", "one", "nested"), { recursive: true });
+  await Deno.writeTextFile(join(repo, "gists", "one", "nested", "b.md"), "B");
+  const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home);
+  assertEquals(await run({ name: "publish", args: ["one"] }, io.context), 1);
+  assert(io.stderr.includes("nested files"));
+});
+
+Deno.test("publish visibility change recreates gist after extra confirmation", async () => {
+  const { home, repo } = await oneFile();
+  await saveState(repo, {
+    version: 2,
+    gists: {
+      one: {
+        id: "old",
+        visibility: "public",
+        remote_updated_at: AT,
+        synced_description_hash: null,
+        files: { "a.md": "old" },
+      },
+    },
+  });
+  const calls: string[] = [];
+  const runner: Runner = (_c, args) => {
+    calls.push(args.join(" "));
+    if (args.includes("POST")) {
+      return Promise.resolve({ code: 0, stdout: `new\t${AT2}`, stderr: "" });
     }
     return Promise.resolve({ code: 0, stdout: "", stderr: "" });
   };
-  return { runner, calls };
-}
-
-async function fixture(entry?: SnippetEntry) {
-  const home = await Deno.makeTempDir();
-  const repo = join(home, "repo");
-  await Deno.mkdir(join(repo, "snippets"), { recursive: true });
-  await Deno.mkdir(join(repo, ".gistan"), { recursive: true });
-  await saveConfig(join(home, "config.toml"), { repo });
-  await Deno.writeTextFile(join(repo, "snippets", "note.md"), "hello");
-  if (entry !== undefined) {
-    await saveState(repo, { version: 1, snippets: { "snippets/note.md": entry } });
-  }
-  return { home, repo };
-}
-
-const HELLO_HASH = await contentHash(new TextEncoder().encode("hello"));
-
-Deno.test("publish creates a public gist with the tag-based description", async () => {
-  const { home, repo } = await fixture({ tags: ["react", "example"], gist: null });
-  const { runner, calls } = ghRunner();
-  const io = memoryContext(runner, home);
-
-  assertEquals(await run({ name: "publish", args: ["note.md"] }, io.context), 0);
-  assertEquals(io.stdout.includes("https://gist.github.com/newid"), true);
-
-  const post = calls.find((call) => call.cmd === "gh" && call.args.includes("POST"));
-  const body = JSON.parse(post?.stdin ?? "{}");
-  assertEquals(body.description, "[react][example]: note.md");
-  assertEquals(body.public, true);
-  assertEquals(body.files["note.md"].content, "hello");
-
-  const state = await loadState(repo);
-  assertEquals(state.snippets["snippets/note.md"].gist, {
-    id: "newid",
-    visibility: "public",
-    synced_hash: HELLO_HASH,
-    remote_updated_at: "2026-03-01T00:00:00Z",
-  });
-
-  const clipboard = calls.find((call) => call.cmd === "pbcopy");
-  assertEquals(clipboard?.stdin, "https://gist.github.com/newid");
-});
-
-Deno.test("publish is idempotent: unchanged content makes no API call", async () => {
-  const { home } = await fixture({
-    tags: [],
-    gist: {
-      id: "g1",
-      visibility: "public",
-      synced_hash: HELLO_HASH,
-      remote_updated_at: "2026-01-01T00:00:00Z",
-    },
-  });
-  const { runner, calls } = ghRunner();
-  const io = memoryContext(runner, home);
-
-  assertEquals(await run({ name: "publish", args: ["note.md"] }, io.context), 0);
-  assertEquals(io.stdout.includes("already up to date"), true);
-  assertEquals(calls.filter((call) => call.cmd === "gh").length, 0);
-});
-
-Deno.test("publish updates the gist when the content changed", async () => {
-  const { home, repo } = await fixture({
-    tags: [],
-    gist: {
-      id: "g1",
-      visibility: "public",
-      synced_hash: "sha256:before-edit",
-      remote_updated_at: "2026-01-01T00:00:00Z",
-    },
-  });
-  const { runner, calls } = ghRunner();
-  const io = memoryContext(runner, home);
-
-  assertEquals(await run({ name: "publish", args: ["note.md"] }, io.context), 0);
-  const patch = calls.find((call) => call.cmd === "gh" && call.args.includes("PATCH"));
-  assertEquals(patch?.args[1], "gists/g1");
-
-  const state = await loadState(repo);
-  assertEquals(state.snippets["snippets/note.md"].gist?.synced_hash, HELLO_HASH);
-  assertEquals(
-    state.snippets["snippets/note.md"].gist?.remote_updated_at,
-    "2026-03-02T00:00:00Z",
-  );
-});
-
-Deno.test("publish refuses a visibility change when the user declines", async () => {
-  const { home, repo } = await fixture({
-    tags: [],
-    gist: {
-      id: "g1",
-      visibility: "public",
-      synced_hash: HELLO_HASH,
-      remote_updated_at: "2026-01-01T00:00:00Z",
-    },
-  });
-  const { runner, calls } = ghRunner();
-  const io = memoryContext(runner, home, { confirmAnswer: false });
-
-  assertEquals(await run({ name: "publish", args: ["note.md", "--secret"] }, io.context), 1);
-  assertEquals(io.confirms.length, 1);
-  assertEquals(calls.filter((call) => call.cmd === "gh").length, 0);
-  const state = await loadState(repo);
-  assertEquals(state.snippets["snippets/note.md"].gist?.id, "g1"); // untouched
-});
-
-Deno.test("publish recreates the gist on an accepted visibility change", async () => {
-  const { home, repo } = await fixture({
-    tags: [],
-    gist: {
-      id: "g1",
-      visibility: "public",
-      synced_hash: HELLO_HASH,
-      remote_updated_at: "2026-01-01T00:00:00Z",
-    },
-  });
-  const { runner, calls } = ghRunner();
   const io = memoryContext(runner, home, { confirmAnswer: true });
-
-  assertEquals(await run({ name: "publish", args: ["note.md", "--secret"] }, io.context), 0);
-  assertEquals(io.stdout.includes("the URL has changed"), true);
-
-  const apiCalls = calls.filter((call) => call.cmd === "gh").map((call) => call.args);
-  assertEquals(apiCalls[0].includes("DELETE"), true);
-  assertEquals(apiCalls[0][1], "gists/g1");
-  assertEquals(apiCalls[1].includes("POST"), true);
-
-  const state = await loadState(repo);
-  assertEquals(state.snippets["snippets/note.md"].gist?.id, "newid");
-  assertEquals(state.snippets["snippets/note.md"].gist?.visibility, "secret");
+  assertEquals(await run({ name: "publish", args: ["one", "--secret"] }, io.context), 0);
+  assert(calls.some((c) => c.includes("DELETE")));
+  assertEquals((await loadState(repo)).gists.one.id, "new");
 });
 
-Deno.test("publish reports a missing snippet file", async () => {
-  const { home } = await fixture();
-  const { runner } = ghRunner();
-  const io = memoryContext(runner, home);
-
-  assertEquals(await run({ name: "publish", args: ["nope.md"] }, io.context), 1);
-  assertEquals(io.stderr.includes("not found"), true);
+Deno.test("import then publish updates existing gist instead of creating a duplicate", async () => {
+  const { home, repo } = await oneFile();
+  await saveState(repo, {
+    version: 2,
+    gists: {
+      one: {
+        id: "gid",
+        visibility: "public",
+        remote_updated_at: AT,
+        synced_description_hash: null,
+        files: { "a.md": "old" },
+      },
+    },
+  });
+  const calls: string[] = [];
+  const runner: Runner = (_c, args) => {
+    calls.push(args.join(" "));
+    if (args.includes("PATCH")) return Promise.resolve({ code: 0, stdout: AT2, stderr: "" });
+    return Promise.resolve({ code: 127, stdout: "", stderr: "" });
+  };
+  const io = memoryContext(runner, home, { confirmAnswer: true });
+  assertEquals(await run({ name: "publish", args: ["one"] }, io.context), 0);
+  assertEquals(calls.some((c) => c.includes("POST")), false);
+  assert(calls.some((c) => c.includes("PATCH")));
 });

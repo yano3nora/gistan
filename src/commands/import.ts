@@ -1,94 +1,64 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { join } from "@std/path";
-import { loadConfig } from "../core/config.ts";
-import { parseDescription, slugify } from "../core/description.ts";
+import { slugify } from "../core/description.ts";
 import { checkDeps, DEPS } from "../core/deps.ts";
 import type { GistSummary } from "../core/gh.ts";
 import { getGistFiles, listOwnGistSummaries } from "../core/gh.ts";
-import { contentHash } from "../core/snippets.ts";
-import type { SnippetEntry, State } from "../core/state.ts";
+import { contentHash, DESCRIPTION_FILE, textHash } from "../core/snippets.ts";
+import type { State } from "../core/state.ts";
 import { loadState, saveState } from "../core/state.ts";
+import { exists, requireConfig } from "./shared.ts";
 import type { CommandArgs, CommandContext } from "./types.ts";
 import { writeText } from "./types.ts";
 
 export async function run(command: CommandArgs, context: CommandContext): Promise<number> {
-  const out = (text: string) => writeText(context.stdout, text);
-  const err = (text: string) => writeText(context.stderr, text);
-
+  const out = (t: string) => writeText(context.stdout, t);
+  const err = (t: string) => writeText(context.stderr, t);
   const flags = parseArgs([...command.args], { string: ["limit"] });
   const limit = flags.limit === undefined ? undefined : Number(flags.limit);
   if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
     await err("error: --limit must be a positive integer\n");
     return 2;
   }
-
-  const config = await loadConfig(context.configPath);
-  if (config === undefined) {
-    await err("error: gistan is not initialized — run `gistan init`\n");
-    return 1;
-  }
-  const repo = config.repo;
-
-  // The scan is part of import's contract (SPEC-0001): refuse to start without it.
+  const config = await requireConfig(context);
+  if (!config) return 1;
   const gitleaks = await checkDeps(context.runner, DEPS.filter((d) => d.name === "gitleaks"));
   if (gitleaks.present.length === 0) {
     await err("error: gitleaks is required for import — brew install gitleaks\n");
     return 1;
   }
-
   const summaries = await listOwnGistSummaries(
     context.runner,
-    (page, total) => out(`fetching gist list… page ${page} (${total} so far)\n`),
+    (p, t) => out(`fetching gist list… page ${p} (${t} so far)\n`),
   );
   const targets = limit === undefined ? summaries : summaries.slice(0, limit);
-  await out(`importing ${targets.length} of ${summaries.length} gists\n`);
-
-  let state = await loadState(repo);
-  const importedIds = new Set(
-    Object.values(state.snippets)
-      .map((entry) => entry.gist?.id)
-      .filter((id): id is string => id !== undefined && id !== null),
-  );
-
-  let imported = 0;
-  let skipped = 0;
-  let failed = 0;
-  for (const [index, gist] of targets.entries()) {
+  let state = await loadState(config.repo);
+  const importedIds = new Set(Object.values(state.gists).map((e) => e.id));
+  let imported = 0, skipped = 0, failed = 0;
+  for (const gist of targets) {
     try {
-      const result = await importOne(repo, state, importedIds, gist, context);
-      if (result === "skipped") {
-        skipped++;
-      } else {
-        state = result;
-        // Saved per gist so an interrupted run resumes where it left off.
-        await saveState(repo, state);
+      const r = await importOne(config.repo, state, importedIds, gist, context, err);
+      if (r === "skipped") skipped++;
+      else {
+        state = r;
+        await saveState(config.repo, state);
         importedIds.add(gist.id);
         imported++;
       }
-    } catch (error) {
+    } catch (e) {
       failed++;
-      const reason = error instanceof Error ? error.message : String(error);
-      await err(`warn: failed to import ${gist.id}: ${reason}\n`);
-    }
-    const done = index + 1;
-    if (done % 25 === 0 || done === targets.length) {
-      await out(`progress: ${done}/${targets.length}\n`);
+      await err(
+        `warn: failed to import ${gist.id}: ${e instanceof Error ? e.message : String(e)}\n`,
+      );
     }
   }
   await out(`done: ${imported} imported, ${skipped} skipped, ${failed} failed\n`);
-
-  const scanCode = await scanForSecrets(repo, context, out, err);
-  if (scanCode !== 0) {
-    return scanCode;
-  }
-  if (failed > 0) {
-    await err(
-      "warn: some gists failed — rerun `gistan import` to retry (already-imported ones are skipped)\n",
-    );
+  const scan = await context.runner("gitleaks", ["dir", config.repo, "--no-banner"]);
+  if (scan.code !== 0) {
+    await err(`${scan.stdout}${scan.stderr}\nerror: potential secrets detected — do NOT commit\n`);
     return 1;
   }
-  await out("ok: secret scan passed — review the files, then commit\n");
-  return 0;
+  return failed > 0 ? 1 : 0;
 }
 
 async function importOne(
@@ -97,94 +67,68 @@ async function importOne(
   importedIds: ReadonlySet<string>,
   gist: GistSummary,
   context: CommandContext,
+  err: (t: string) => Promise<void>,
 ): Promise<State | "skipped"> {
-  if (importedIds.has(gist.id)) {
+  if (importedIds.has(gist.id)) return "skipped";
+  const files = await getGistFiles(context.runner, gist.id);
+  if (files.some((f) => f.filename === DESCRIPTION_FILE)) {
+    await err(`warn: ${gist.id} contains reserved ${DESCRIPTION_FILE}; skipped\n`);
     return "skipped";
   }
-  const { tags, title } = parseDescription(gist.description);
-  const files = (await getGistFiles(context.runner, gist.id)).filter((file) => {
-    if (file.truncated === true || file.content === undefined) {
-      throw new Error(`file ${file.filename} is truncated (>1MB) — import it manually`);
+  if (files.length === 0) throw new Error("gist has no files");
+  const dir = await allocateDir(repo, state, gist.description, gist.id, context);
+  if (dir === undefined) return "skipped";
+  await Deno.mkdir(join(repo, "gists", dir), { recursive: true });
+  const hashes: Record<string, string> = {};
+  for (const f of files) {
+    if (f.content === undefined || f.truncated) {
+      throw new Error(`file ${f.filename} is truncated (>1MB) — import it manually`);
     }
-    return true;
-  });
-  if (files.length === 0) {
-    throw new Error("gist has no files");
+    await Deno.writeTextFile(join(repo, "gists", dir, f.filename), f.content);
+    hashes[f.filename] = await contentHash(new TextEncoder().encode(f.content));
   }
-
-  if (files.length === 1) {
-    const file = files[0];
-    const relPath = await allocateFilePath(repo, file.filename, gist.id);
-    await Deno.writeTextFile(join(repo, relPath), file.content ?? "");
-    const entry: SnippetEntry = {
-      tags,
-      gist: {
+  const desc = gist.description.trim();
+  if (desc !== "") await Deno.writeTextFile(join(repo, "gists", dir, DESCRIPTION_FILE), desc);
+  return {
+    version: 2,
+    gists: {
+      ...state.gists,
+      [dir]: {
         id: gist.id,
         visibility: gist.public ? "public" : "secret",
-        synced_hash: await contentHash(new TextEncoder().encode(file.content ?? "")),
         remote_updated_at: gist.updated_at,
+        synced_description_hash: desc === "" ? null : await textHash(desc),
+        files: hashes,
       },
-    };
-    return { version: 1, snippets: { ...state.snippets, [relPath]: entry } };
-  }
-
-  // Multi-file gists are kept as a directory for reading/searching only (v1),
-  // without index entries. The id suffix makes the path self-identifying and
-  // deterministic, so re-runs simply overwrite the same directory (idempotent).
-  const slug = slugify(title);
-  const dirRel = `snippets/${slug === "" ? "gist" : slug}--${gist.id.slice(0, 8)}`;
-  await Deno.mkdir(join(repo, dirRel), { recursive: true });
-  for (const file of files) {
-    await Deno.writeTextFile(join(repo, dirRel, file.filename), file.content ?? "");
-  }
-  return state;
+    },
+  };
 }
 
-/**
- * Duplicate gist filenames are common across hundreds of gists; collisions get
- * a deterministic `--<gist id prefix>` suffix, so re-runs map to the same path.
- */
-async function allocateFilePath(repo: string, filename: string, id: string): Promise<string> {
-  const base = `snippets/${filename}`;
-  if (!(await exists(join(repo, base)))) {
-    return base;
-  }
-  const dot = filename.lastIndexOf(".");
-  const stem = dot > 0 ? filename.slice(0, dot) : filename;
-  const ext = dot > 0 ? filename.slice(dot) : "";
-  return `snippets/${stem}--${id.slice(0, 8)}${ext}`;
-}
-
-async function exists(path: string): Promise<boolean> {
-  try {
-    await Deno.stat(path);
-    return true;
-  } catch (error) {
-    if (error instanceof Deno.errors.NotFound) {
-      return false;
-    }
-    throw error;
-  }
-}
-
-/** gitleaks exit code 1 = leaks found; anything else non-zero = tool failure. */
-async function scanForSecrets(
+async function allocateDir(
   repo: string,
+  state: State,
+  description: string,
+  id: string,
   context: CommandContext,
-  out: (text: string) => Promise<void>,
-  err: (text: string) => Promise<void>,
-): Promise<number> {
-  await out("running secret scan (gitleaks)…\n");
-  const scan = await context.runner("gitleaks", ["dir", repo, "--no-banner"]);
-  if (scan.code === 0) {
-    return 0;
+): Promise<string | undefined> {
+  const base = slugify(description) || `gist--${id.slice(0, 8)}`;
+  if (!(await exists(join(repo, "gists", base)))) return base;
+  if (!state.gists[base]) {
+    if (await context.confirm(`gists/${base} already exists and is not indexed. Override it?`)) {
+      await Deno.remove(join(repo, "gists", base), { recursive: true });
+      return base;
+    }
+    return undefined;
   }
-  const report = `${scan.stdout}\n${scan.stderr}`.trim();
-  if (report !== "") {
-    await err(`${report}\n`);
+  const suffixed = `${base}--${id.slice(0, 8)}`;
+  if (!(await exists(join(repo, "gists", suffixed)))) return suffixed;
+  if (!state.gists[suffixed]) {
+    if (
+      await context.confirm(`gists/${suffixed} already exists and is not indexed. Override it?`)
+    ) {
+      await Deno.remove(join(repo, "gists", suffixed), { recursive: true });
+      return suffixed;
+    }
   }
-  await err(
-    "error: potential secrets detected — do NOT commit. Mask or remove them, then rerun `gistan import`\n",
-  );
-  return 1;
+  return undefined;
 }

@@ -1,61 +1,84 @@
-import { assertEquals } from "@std/assert";
-import { join } from "@std/path";
-import { saveConfig } from "../core/config.ts";
+import { assert, assertEquals } from "@std/assert";
 import { saveState } from "../core/state.ts";
-import { memoryContext } from "../testing.ts";
-import { run as runList } from "./list.ts";
-import { run as runRoot } from "./root.ts";
+import { AT, fixture, join, memoryContext } from "./test_helpers.ts";
+import { run } from "./list.ts";
 
-const ok = () => Promise.resolve({ code: 0, stdout: "", stderr: "" });
-
-async function fixture() {
-  const home = await Deno.makeTempDir();
-  const repo = join(home, "repo");
-  await Deno.mkdir(join(repo, "snippets"), { recursive: true });
-  await Deno.mkdir(join(repo, ".gistan"), { recursive: true });
-  await saveConfig(join(home, "config.toml"), { repo });
-  await Deno.writeTextFile(join(repo, "snippets", "a.md"), "a");
-  await Deno.writeTextFile(join(repo, "snippets", "b.md"), "b");
-  await saveState(repo, {
-    version: 1,
-    snippets: {
-      "snippets/a.md": {
-        tags: ["react"],
-        gist: {
-          id: "g1",
-          visibility: "public",
-          synced_hash: "sha256:x",
-          remote_updated_at: "2026-01-01T00:00:00Z",
-        },
+async function sample() {
+  const f = await fixture();
+  await Deno.mkdir(join(f.repo, "gists", "local"), { recursive: true });
+  await Deno.writeTextFile(join(f.repo, "gists", "local", "a.md"), "A");
+  await Deno.mkdir(join(f.repo, "gists", "pub"), { recursive: true });
+  await Deno.writeTextFile(join(f.repo, "gists", "pub", "b.md"), "B");
+  await saveState(f.repo, {
+    version: 2,
+    gists: {
+      pub: {
+        id: "gid",
+        visibility: "secret",
+        remote_updated_at: AT,
+        synced_description_hash: null,
+        files: { "b.md": "h" },
       },
     },
   });
-  return { home, repo };
+  return f;
 }
 
-Deno.test("list shows tags and publish state; filters work", async () => {
-  const { home } = await fixture();
-
-  const all = memoryContext(ok, home);
-  assertEquals(await runList({ name: "list", args: [] }, all.context), 0);
-  assertEquals(all.stdout.includes("[react]"), true);
-  assertEquals(all.stdout.includes("https://gist.github.com/g1"), true);
-  assertEquals(all.stdout.includes("2 snippet(s)"), true);
-
-  const published = memoryContext(ok, home);
-  assertEquals(await runList({ name: "list", args: ["--published"] }, published.context), 0);
-  assertEquals(published.stdout.includes("a.md"), true);
-  assertEquals(published.stdout.includes("b.md"), false);
-
-  const tagged = memoryContext(ok, home);
-  assertEquals(await runList({ name: "list", args: ["--tag", "nope"] }, tagged.context), 0);
-  assertEquals(tagged.stdout.includes("0 snippet(s)"), true);
+Deno.test("list shows local and published dirs", async () => {
+  const { home } = await sample();
+  const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home);
+  assertEquals(await run({ name: "list", args: [] }, io.context), 0);
+  assert(io.stdout.includes("local"));
+  assert(io.stdout.includes("pub"));
 });
 
-Deno.test("root prints the repo path", async () => {
-  const { home, repo } = await fixture();
-  const io = memoryContext(ok, home);
+Deno.test("list --published filters unpublished dirs", async () => {
+  const { home } = await sample();
+  const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home);
+  assertEquals(await run({ name: "list", args: ["--published"] }, io.context), 0);
+  assert(io.stdout.includes("pub"));
+  assertEquals(io.stdout.includes("local"), false);
+});
 
-  assertEquals(await runRoot({ name: "root", args: [] }, io.context), 0);
-  assertEquals(io.stdout, `${repo}\n`);
+Deno.test("list --local filters published dirs", async () => {
+  const { home } = await sample();
+  const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home);
+  assertEquals(await run({ name: "list", args: ["--local"] }, io.context), 0);
+  assert(io.stdout.includes("local"));
+  assertEquals(io.stdout.includes("pub"), false);
+});
+
+Deno.test("list --stars prints files under stars", async () => {
+  const { home, repo } = await fixture();
+  await Deno.mkdir(join(repo, "stars", "someone"), { recursive: true });
+  await Deno.writeTextFile(join(repo, "stars", "someone", "x.md"), "X");
+  const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home);
+  assertEquals(await run({ name: "list", args: ["--stars"] }, io.context), 0);
+  assert(io.stdout.includes("stars/someone/x.md"));
+});
+
+Deno.test("list includes index-only dir count", async () => {
+  const { home, repo } = await fixture();
+  await saveState(repo, {
+    version: 2,
+    gists: {
+      gone: {
+        id: "gid",
+        visibility: "public",
+        remote_updated_at: AT,
+        synced_description_hash: null,
+        files: { "a.md": "h" },
+      },
+    },
+  });
+  const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home);
+  assertEquals(await run({ name: "list", args: [] }, io.context), 0);
+  assert(io.stdout.includes("gone"));
+});
+
+Deno.test("list empty repo prints zero gists", async () => {
+  const { home } = await fixture();
+  const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home);
+  assertEquals(await run({ name: "list", args: [] }, io.context), 0);
+  assert(io.stdout.includes("0 gist"));
 });

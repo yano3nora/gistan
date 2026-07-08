@@ -1,102 +1,165 @@
-import { assertEquals } from "@std/assert";
-import { join } from "@std/path";
-import { saveConfig } from "../core/config.ts";
+import { assert, assertEquals } from "@std/assert";
 import type { Runner } from "../core/proc.ts";
-import { contentHash } from "../core/snippets.ts";
+import { contentHash, textHash } from "../core/snippets.ts";
 import { loadState, saveState } from "../core/state.ts";
-import { memoryContext } from "../testing.ts";
+import { AT, AT2, fixture, join, memoryContext } from "./test_helpers.ts";
 import { run } from "./pull.ts";
 
-const OLD_AT = "2026-01-01T00:00:00Z";
-const NEW_AT = "2026-02-01T00:00:00Z";
-
-/** One published snippet; remote has newer content ("remote edit"). */
-async function fixture(localContent: string, syncedContent: string) {
-  const home = await Deno.makeTempDir();
-  const repo = join(home, "repo");
-  await Deno.mkdir(join(repo, "snippets"), { recursive: true });
-  await Deno.mkdir(join(repo, ".gistan"), { recursive: true });
-  await saveConfig(join(home, "config.toml"), { repo });
-  await Deno.writeTextFile(join(repo, "snippets", "note.md"), localContent);
-  await saveState(repo, {
-    version: 1,
-    snippets: {
-      "snippets/note.md": {
-        tags: [],
-        gist: {
-          id: "g1",
-          visibility: "public",
-          synced_hash: await contentHash(new TextEncoder().encode(syncedContent)),
-          remote_updated_at: OLD_AT,
-        },
+async function published(local = "A", synced = "A") {
+  const f = await fixture();
+  await Deno.mkdir(join(f.repo, "gists", "one"), { recursive: true });
+  await Deno.writeTextFile(join(f.repo, "gists", "one", "a.md"), local);
+  await saveState(f.repo, {
+    version: 2,
+    gists: {
+      one: {
+        id: "gid",
+        visibility: "public",
+        remote_updated_at: AT,
+        synced_description_hash: null,
+        files: { "a.md": await contentHash(new TextEncoder().encode(synced)) },
       },
     },
   });
-  return { home, repo };
+  return f;
 }
 
-function remoteRunner(remoteContent: string): Runner {
+function runner(remoteContent: string, description = "", fzf = "one\n"): Runner {
   return (cmd, args) => {
+    if (cmd === "fzf") return Promise.resolve({ code: 0, stdout: fzf, stderr: "" });
     if (cmd === "gh" && args[1] === "gists?per_page=100") {
-      return Promise.resolve({ code: 0, stdout: `g1\t${NEW_AT}\ttrue\n`, stderr: "" });
+      return Promise.resolve({ code: 0, stdout: `gid\t${AT2}\ttrue\n`, stderr: "" });
     }
-    if (cmd === "gh" && args[1] === "gists/g1") {
+    if (cmd === "gh" && args[1] === "gists/gid") {
       return Promise.resolve({
         code: 0,
         stdout: JSON.stringify({
-          files: { "note.md": { filename: "note.md", content: remoteContent } },
+          description,
+          updated_at: AT2,
+          files: { "a.md": { filename: "a.md", content: remoteContent } },
         }),
         stderr: "",
       });
     }
-    return Promise.resolve({ code: 0, stdout: "", stderr: "" }); // git diff etc.
+    return Promise.resolve({ code: 0, stdout: "", stderr: "" });
   };
 }
 
-Deno.test("pull applies remote drift automatically", async () => {
-  // local == last-synced, remote moved on → clean fast-forward.
-  const { home, repo } = await fixture("synced", "synced");
-  const io = memoryContext(remoteRunner("remote edit"), home);
-
-  assertEquals(await run({ name: "pull", args: [] }, io.context), 0);
-  assertEquals(io.stdout.includes("pulled: note.md"), true);
-  assertEquals(await Deno.readTextFile(join(repo, "snippets", "note.md")), "remote edit");
-
-  const gist = (await loadState(repo)).snippets["snippets/note.md"].gist;
-  assertEquals(gist?.remote_updated_at, NEW_AT);
-  assertEquals(gist?.synced_hash, await contentHash(new TextEncoder().encode("remote edit")));
-  assertEquals(io.confirms.length, 0); // no conflict, no prompt
-});
-
-Deno.test("pull conflict: declining keeps the local version", async () => {
-  const { home, repo } = await fixture("local edit", "synced");
-  const io = memoryContext(remoteRunner("remote edit"), home, { confirmAnswer: false });
-
-  assertEquals(await run({ name: "pull", args: [] }, io.context), 0);
-  assertEquals(io.confirms.length, 1);
-  assertEquals(await Deno.readTextFile(join(repo, "snippets", "note.md")), "local edit");
-  assertEquals(io.stdout.includes("local kept"), true);
-});
-
-Deno.test("pull conflict: accepting takes the remote version", async () => {
-  const { home, repo } = await fixture("local edit", "synced");
-  const io = memoryContext(remoteRunner("remote edit"), home, { confirmAnswer: true });
-
-  assertEquals(await run({ name: "pull", args: [] }, io.context), 0);
-  assertEquals(await Deno.readTextFile(join(repo, "snippets", "note.md")), "remote edit");
-  assertEquals(io.stdout.includes("conflict resolved as remote"), true);
-});
-
-Deno.test("pull warns about gists deleted upstream", async () => {
-  const { home } = await fixture("synced", "synced");
-  const runner: Runner = (cmd, args) => {
+Deno.test("pull without arg fuzzy-picks one remote drift instead of bulk pulling", async () => {
+  const { home, repo } = await published();
+  await Deno.mkdir(join(repo, "gists", "two"), { recursive: true });
+  await Deno.writeTextFile(join(repo, "gists", "two", "b.md"), "B");
+  await saveState(repo, {
+    version: 2,
+    gists: {
+      ...(await loadState(repo)).gists,
+      two: {
+        id: "g2",
+        visibility: "public",
+        remote_updated_at: AT,
+        synced_description_hash: null,
+        files: { "b.md": await contentHash(new TextEncoder().encode("B")) },
+      },
+    },
+  });
+  const calls: string[] = [];
+  const r: Runner = (cmd, args, opt) => {
+    calls.push(`${cmd} ${args.join(" ")} ${opt?.stdin ?? ""}`);
+    if (cmd === "fzf") return Promise.resolve({ code: 0, stdout: "one\n", stderr: "" });
     if (cmd === "gh" && args[1] === "gists?per_page=100") {
-      return Promise.resolve({ code: 0, stdout: "", stderr: "" }); // g1 gone
+      return Promise.resolve({
+        code: 0,
+        stdout: `gid\t${AT2}\ttrue\ng2\t${AT2}\ttrue\n`,
+        stderr: "",
+      });
     }
+    if (cmd === "gh" && args[1] === "gists/gid") {
+      return Promise.resolve({
+        code: 0,
+        stdout: JSON.stringify({
+          description: "",
+          updated_at: AT2,
+          files: { "a.md": { filename: "a.md", content: "R" } },
+        }),
+        stderr: "",
+      });
+    }
+    if (cmd === "gh" && args[1] === "gists/g2") throw new Error("bulk pull happened");
     return Promise.resolve({ code: 0, stdout: "", stderr: "" });
   };
-  const io = memoryContext(runner, home);
-
+  const io = memoryContext(r, home);
   assertEquals(await run({ name: "pull", args: [] }, io.context), 0);
-  assertEquals(io.stderr.includes("deleted upstream"), true);
+  assert(calls.some((c) => c.startsWith("fzf") && c.includes("one") && c.includes("two")));
+  assertEquals(await Deno.readTextFile(join(repo, "gists", "one", "a.md")), "R");
+  assertEquals(await Deno.readTextFile(join(repo, "gists", "two", "b.md")), "B");
 });
+
+Deno.test("pull without candidates prints no remote drift", async () => {
+  const { home } = await published();
+  const r: Runner = (cmd, args) => {
+    if (cmd === "gh" && args[1] === "gists?per_page=100") {
+      return Promise.resolve({ code: 0, stdout: `gid\t${AT}\ttrue\n`, stderr: "" });
+    }
+    throw new Error("fzf should not run");
+  };
+  const io = memoryContext(r, home);
+  assertEquals(await run({ name: "pull", args: [] }, io.context), 0);
+  assert(io.stdout.includes("no remote drift"));
+});
+
+Deno.test("pull removes local files missing from remote", async () => {
+  const { home, repo } = await published();
+  await Deno.writeTextFile(join(repo, "gists", "one", "stale.md"), "stale");
+  const io = memoryContext(runner("R"), home);
+  assertEquals(await run({ name: "pull", args: ["one"] }, io.context), 0);
+  await assertRejectsNotFound(join(repo, "gists", "one", "stale.md"));
+  assertEquals((await loadState(repo)).gists.one.files, {
+    "a.md": await contentHash(new TextEncoder().encode("R")),
+  });
+});
+
+Deno.test("pull writes remote description and synced description hash", async () => {
+  const { home, repo } = await published();
+  const io = memoryContext(runner("R", "Remote desc"), home);
+  assertEquals(await run({ name: "pull", args: ["one"] }, io.context), 0);
+  assertEquals(
+    await Deno.readTextFile(join(repo, "gists", "one", ".description.txt")),
+    "Remote desc",
+  );
+  assertEquals(
+    (await loadState(repo)).gists.one.synced_description_hash,
+    await textHash("Remote desc"),
+  );
+});
+
+Deno.test("pull deletes local description when remote description is empty", async () => {
+  const { home, repo } = await published();
+  await Deno.writeTextFile(join(repo, "gists", "one", ".description.txt"), "Local");
+  const io = memoryContext(runner("R", ""), home);
+  assertEquals(await run({ name: "pull", args: ["one"] }, io.context), 0);
+  await assertRejectsNotFound(join(repo, "gists", "one", ".description.txt"));
+  assertEquals((await loadState(repo)).gists.one.synced_description_hash, null);
+});
+
+Deno.test("pull conflict decline keeps local files", async () => {
+  const { home, repo } = await published("local", "synced");
+  const io = memoryContext(runner("remote"), home, { confirmAnswer: false });
+  assertEquals(await run({ name: "pull", args: ["one"] }, io.context), 0);
+  assertEquals(await Deno.readTextFile(join(repo, "gists", "one", "a.md")), "local");
+});
+
+Deno.test("pull returns gh list failure", async () => {
+  const { home } = await published();
+  const io = memoryContext(() => Promise.resolve({ code: 1, stdout: "", stderr: "bad" }), home);
+  assertEquals(await run({ name: "pull", args: [] }, io.context), 1);
+  assert(io.stderr.includes("gh api gists failed"));
+});
+
+async function assertRejectsNotFound(path: string) {
+  try {
+    await Deno.stat(path);
+    throw new Error("expected missing file");
+  } catch (e) {
+    if (!(e instanceof Deno.errors.NotFound)) throw e;
+  }
+}

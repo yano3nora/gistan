@@ -2,59 +2,58 @@ import { join } from "@std/path";
 
 export type Visibility = "public" | "secret";
 
-/** Field names mirror the on-disk JSON (SPEC-0001) — no case conversion layer. */
-export interface GistLink {
+export interface GistIndexEntry {
   readonly id: string;
   readonly visibility: Visibility;
-  /** Content hash at last sync; a differing current hash means local drift. */
-  readonly synced_hash: string;
-  /** Remote updated_at at last sync; a differing live value means remote drift. */
   readonly remote_updated_at: string;
-}
-
-export interface SnippetEntry {
-  readonly tags: readonly string[];
-  /** null = tracked but never published. */
-  readonly gist: GistLink | null;
+  /** Hash of trimmed .description.txt content at last sync; null means empty/no description. */
+  readonly synced_description_hash: string | null;
+  /** filename -> content hash at last sync. Reserved .description.txt is never included. */
+  readonly files: Readonly<Record<string, string>>;
 }
 
 export interface State {
-  readonly version: 1;
-  readonly snippets: Readonly<Record<string, SnippetEntry>>;
+  readonly version: 2;
+  readonly gists: Readonly<Record<string, GistIndexEntry>>;
 }
 
-export const EMPTY_STATE: State = { version: 1, snippets: {} };
+export const EMPTY_STATE: State = { version: 2, gists: {} };
+
+const V1_ERROR =
+  "error: index schema v1 detected — gistan v2 restructured the repo layout. Re-run 'gistan root init' with a fresh repo and 'gistan import'. See docs/TASK-260708-gists-multi-file-restructure.md";
 
 export function statePath(repoDir: string): string {
   return join(repoDir, ".gistan", "state.json");
 }
 
-/** A missing file is treated as an empty index — direct deletion must not break gistan. */
+/** Missing index = empty v2 index. v1 intentionally has no migration path. */
 export async function loadState(repoDir: string): Promise<State> {
   let text: string;
   try {
     text = await Deno.readTextFile(statePath(repoDir));
   } catch (error) {
-    if (error instanceof Deno.errors.NotFound) {
-      return EMPTY_STATE;
-    }
+    if (error instanceof Deno.errors.NotFound) return EMPTY_STATE;
     throw error;
   }
   const data = JSON.parse(text);
-  if (data?.version !== 1 || typeof data.snippets !== "object" || data.snippets === null) {
+  if (data?.version === 1) throw new Error(V1_ERROR);
+  if (data?.version !== 2 || typeof data.gists !== "object" || data.gists === null) {
     throw new Error(`invalid index at ${statePath(repoDir)} — restore it from git history`);
   }
   return data as State;
 }
 
 export async function saveState(repoDir: string, state: State): Promise<void> {
-  // Keys are written sorted for stable diffs and fewer merge conflicts (SPEC-0001).
-  const snippets: Record<string, SnippetEntry> = {};
-  for (const key of Object.keys(state.snippets).sort()) {
-    snippets[key] = state.snippets[key];
+  const gists: Record<string, GistIndexEntry> = {};
+  for (const dir of Object.keys(state.gists).sort()) {
+    const entry = state.gists[dir];
+    const files: Record<string, string> = {};
+    for (const filename of Object.keys(entry.files).sort()) files[filename] = entry.files[filename];
+    gists[dir] = { ...entry, files };
   }
+  await Deno.mkdir(join(repoDir, ".gistan"), { recursive: true });
   await Deno.writeTextFile(
     statePath(repoDir),
-    `${JSON.stringify({ version: 1, snippets }, null, 2)}\n`,
+    `${JSON.stringify({ version: 2, gists }, null, 2)}\n`,
   );
 }

@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { run } from "./main.ts";
 import type { CommandArgs, CommandContext } from "./commands/types.ts";
 
@@ -83,4 +83,26 @@ Deno.test("returns usage on an unknown subcommand", async () => {
   assertEquals(io.stdout, "");
   assertEquals(io.stderr.includes("Usage:"), true);
   assertEquals(io.stderr.includes("status"), true);
+});
+
+Deno.test("prints version without dispatching a command", async () => {
+  const io = memoryContext();
+  const code = await run(["--version"], { context: io.context });
+  assertEquals(code, 0);
+  assertEquals(io.stdout.trim().startsWith("gistan "), true);
+  assertEquals(io.stderr, "");
+});
+
+Deno.test("gistan init points the user at gistan root init (TASK-260708)", async () => {
+  const io = memoryContext();
+  const code = await run(["init", "some-dir"], { context: io.context });
+  assertEquals(code, 2);
+  assert(io.stderr.includes("did you mean 'gistan root init'?"));
+});
+
+Deno.test("gistan sync points the user at gistan root commit/push/pull (TASK-260708)", async () => {
+  const io = memoryContext();
+  const code = await run(["sync"], { context: io.context });
+  assertEquals(code, 2);
+  assert(io.stderr.includes("'gistan sync' was removed — use 'gistan root commit / push / pull'"));
 });

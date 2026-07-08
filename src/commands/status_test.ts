@@ -1,132 +1,140 @@
-import { assertEquals } from "@std/assert";
-import { join } from "@std/path";
-import { saveConfig } from "../core/config.ts";
-import type { Runner } from "../core/proc.ts";
+import { assert, assertEquals } from "@std/assert";
 import { contentHash } from "../core/snippets.ts";
-import { saveState } from "../core/state.ts";
-import { memoryContext } from "../testing.ts";
+import { loadState, saveState } from "../core/state.ts";
+import { AT, fixture, join, memoryContext } from "./test_helpers.ts";
 import { run } from "./status.ts";
 
-const SYNCED_AT = "2026-01-01T00:00:00Z";
-
-/**
- * Fixture: a.md published & in-sync (g1), b.md published & locally edited (g2),
- * c.md untracked, d.md gone from disk but still in the index (g3).
- */
-async function makeFixture() {
-  const home = await Deno.makeTempDir();
-  const repo = join(home, "repo");
-  await Deno.mkdir(join(repo, "snippets"), { recursive: true });
-  await Deno.mkdir(join(repo, ".gistan"), { recursive: true });
-  await saveConfig(join(home, "config.toml"), { repo });
-
-  await Deno.writeTextFile(join(repo, "snippets", "a.md"), "content a");
-  await Deno.writeTextFile(join(repo, "snippets", "b.md"), "content b (edited)");
-  await Deno.writeTextFile(join(repo, "snippets", "c.md"), "content c");
-
-  const hashA = await contentHash(new TextEncoder().encode("content a"));
-  await saveState(repo, {
-    version: 1,
-    snippets: {
-      "snippets/a.md": {
-        tags: [],
-        gist: {
-          id: "g1",
-          visibility: "public",
-          synced_hash: hashA,
-          remote_updated_at: SYNCED_AT,
-        },
-      },
-      "snippets/b.md": {
-        tags: [],
-        gist: {
-          id: "g2",
-          visibility: "secret",
-          synced_hash: "sha256:before-edit",
-          remote_updated_at: SYNCED_AT,
-        },
-      },
-      "snippets/d.md": {
-        tags: [],
-        gist: {
-          id: "g3",
-          visibility: "public",
-          synced_hash: "sha256:whatever",
-          remote_updated_at: SYNCED_AT,
-        },
+async function published() {
+  const f = await fixture();
+  await Deno.mkdir(join(f.repo, "gists", "one"), { recursive: true });
+  await Deno.writeTextFile(join(f.repo, "gists", "one", "a.md"), "A");
+  await saveState(f.repo, {
+    version: 2,
+    gists: {
+      one: {
+        id: "gid",
+        visibility: "public",
+        remote_updated_at: AT,
+        synced_description_hash: null,
+        files: { "a.md": await contentHash(new TextEncoder().encode("A")) },
       },
     },
   });
-  return home;
+  return f;
 }
 
-const remoteOk: Runner = (cmd, args) => {
-  if (cmd === "gh" && args[0] === "api") {
-    return Promise.resolve({
-      code: 0,
-      stdout: `g1\t${SYNCED_AT}\ttrue\ng2\t${SYNCED_AT}\tfalse\ng3\t${SYNCED_AT}\ttrue\n`,
-      stderr: "",
-    });
-  }
-  return Promise.resolve({ code: 0, stdout: "", stderr: "" });
-};
-
-Deno.test("status --remote classifies snippets and prints a summary", async () => {
-  const home = await makeFixture();
-  const io = memoryContext(remoteOk, home);
-
-  assertEquals(await run({ name: "status", args: ["--remote"] }, io.context), 0);
-  assertEquals(io.stdout.includes("in-sync (public)"), true);
-  assertEquals(io.stdout.includes("https://gist.github.com/g1"), true);
-  assertEquals(io.stdout.includes("local-drift"), true);
-  assertEquals(io.stdout.includes("unpublished"), true);
-  assertEquals(io.stdout.includes("file-missing"), true);
-  assertEquals(io.stdout.includes("4 snippet(s):"), true);
-  assertEquals(io.stdout.includes("snippets/"), false); // structural prefix hidden
-});
-
-Deno.test("status is local-only by default: fast, no API call", async () => {
-  const home = await makeFixture();
-  const ghCalls: string[] = [];
-  const recording: Runner = (cmd, args, options) => {
-    if (cmd === "gh") {
-      ghCalls.push(args.join(" "));
-    }
-    return remoteOk(cmd, args, options);
-  };
-  const io = memoryContext(recording, home);
-
+Deno.test("status default does not call gh", async () => {
+  const { home } = await published();
+  const calls: string[] = [];
+  const io = memoryContext((cmd, args) => {
+    calls.push(`${cmd} ${args.join(" ")}`);
+    return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+  }, home);
   assertEquals(await run({ name: "status", args: [] }, io.context), 0);
-  assertEquals(ghCalls, []); // never touches the network without --remote
-  assertEquals(io.stdout.includes("published (public)"), true); // a.md, unchanged
-  assertEquals(io.stdout.includes("local-drift"), true); // b.md, judged locally
-  assertEquals(io.stdout.includes("add --remote"), true); // hint
+  assertEquals(calls.filter((c) => c.startsWith("gh ")), []);
 });
 
-Deno.test("status filters by bare filename", async () => {
-  const home = await makeFixture();
-  const io = memoryContext(remoteOk, home);
-
-  assertEquals(await run({ name: "status", args: ["c.md"] }, io.context), 0);
-  assertEquals(io.stdout.includes("c.md"), true);
-  assertEquals(io.stdout.includes("a.md"), false);
-});
-
-Deno.test("status --remote degrades to local judgement when gh fails", async () => {
-  const home = await makeFixture();
-  const failing: Runner = () => Promise.resolve({ code: 1, stdout: "", stderr: "boom" });
-  const io = memoryContext(failing, home);
-
-  assertEquals(await run({ name: "status", args: ["--remote"] }, io.context), 0);
-  assertEquals(io.stderr.includes("remote check skipped"), true);
-  assertEquals(io.stdout.includes("published (public)"), true); // a.md: no local change
-  assertEquals(io.stdout.includes("local-drift"), true); // b.md: judged without remote
-});
-
-Deno.test("status requires init to have run", async () => {
-  const home = await Deno.makeTempDir();
+Deno.test("status warns for bare and nested files", async () => {
+  const { home, repo } = await fixture();
+  await Deno.writeTextFile(join(repo, "gists", "bare.md"), "B");
+  await Deno.mkdir(join(repo, "gists", "one", "nested"), { recursive: true });
+  await Deno.writeTextFile(join(repo, "gists", "one", "nested", "x.md"), "X");
   const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home);
+  assertEquals(await run({ name: "status", args: [] }, io.context), 0);
+  assert(io.stderr.includes("not managed"));
+  assert(io.stderr.includes("nested too deeply"));
+});
 
-  assertEquals(await run({ name: "status", args: [] }, io.context), 1);
-  assertEquals(io.stderr.includes("gistan init"), true);
+Deno.test("status --remote reports remote drift", async () => {
+  const { home } = await published();
+  const io = memoryContext((cmd, args) => {
+    if (cmd === "gh" && args[1] === "gists?per_page=100") {
+      return Promise.resolve({ code: 0, stdout: "gid\tT2\ttrue\n", stderr: "" });
+    }
+    return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+  }, home);
+  assertEquals(await run({ name: "status", args: ["--remote"] }, io.context), 0);
+  assert(io.stdout.includes("remote-drift"));
+});
+
+Deno.test("status --fix can unlink remote-deleted", async () => {
+  const { home, repo } = await published();
+  const io = memoryContext(
+    (cmd, args) => {
+      if (cmd === "gh" && args[1] === "gists?per_page=100") {
+        return Promise.resolve({
+          code: 0,
+          stdout: "",
+          stderr: "",
+        });
+      }
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    },
+    home,
+    { confirmAnswer: true },
+  );
+  assertEquals(await run({ name: "status", args: ["--fix"] }, io.context), 0);
+  assertEquals((await loadState(repo)).gists.one, undefined);
+});
+
+Deno.test("status --fix restores missing local dir from remote", async () => {
+  const { home, repo } = await published();
+  await Deno.remove(join(repo, "gists", "one"), { recursive: true });
+  const io = memoryContext(
+    (cmd, args) => {
+      if (cmd === "gh" && args[1] === "gists?per_page=100") {
+        return Promise.resolve({
+          code: 0,
+          stdout: `gid\t${AT}\ttrue\n`,
+          stderr: "",
+        });
+      }
+      if (cmd === "gh" && args[1] === "gists/gid") {
+        return Promise.resolve({
+          code: 0,
+          stdout: JSON.stringify({ files: { "a.md": { filename: "a.md", content: "A" } } }),
+          stderr: "",
+        });
+      }
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    },
+    home,
+    { confirmAnswer: true },
+  );
+  assertEquals(await run({ name: "status", args: ["--fix"] }, io.context), 0);
+  assertEquals(await Deno.readTextFile(join(repo, "gists", "one", "a.md")), "A");
+});
+
+Deno.test("status --fix can delete orphan gist when restore declined", async () => {
+  const { home, repo } = await published();
+  await Deno.remove(join(repo, "gists", "one"), { recursive: true });
+  const calls: string[] = [];
+  const io = memoryContext(
+    (cmd, args) => {
+      calls.push(args.join(" "));
+      if (cmd === "gh" && args[1] === "gists?per_page=100") {
+        return Promise.resolve({
+          code: 0,
+          stdout: `gid\t${AT}\ttrue\n`,
+          stderr: "",
+        });
+      }
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    },
+    home,
+    { confirmAnswer: [false, true] },
+  );
+  assertEquals(await run({ name: "status", args: ["--fix"] }, io.context), 0);
+  assert(calls.some((c) => c.includes("DELETE")));
+  assertEquals((await loadState(repo)).gists.one, undefined);
+});
+
+Deno.test("status filter limits output to one dir", async () => {
+  const { home, repo } = await published();
+  await Deno.mkdir(join(repo, "gists", "two"), { recursive: true });
+  await Deno.writeTextFile(join(repo, "gists", "two", "b.md"), "B");
+  const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home);
+  assertEquals(await run({ name: "status", args: ["one"] }, io.context), 0);
+  assert(io.stdout.includes("one"));
+  assertEquals(io.stdout.includes("two"), false);
 });

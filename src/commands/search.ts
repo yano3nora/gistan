@@ -1,3 +1,5 @@
+import { parseArgs } from "@std/cli/parse-args";
+import { join, resolve } from "@std/path";
 import { checkDeps, DEPS } from "../core/deps.ts";
 import { FZF_ABORTED, FZF_NO_MATCH, openEditor, requireConfig } from "./shared.ts";
 import type { CommandArgs, CommandContext } from "./types.ts";
@@ -11,12 +13,14 @@ import { writeText } from "./types.ts";
  * a given rg version's ignore semantics for explicit path arguments are.
  */
 const GREP_CMD =
-  "rg --column --line-number --no-heading --color=always --smart-case --no-ignore -- {q} snippets stars || true";
-const LIST_CMD = "rg --files --no-ignore snippets stars";
+  "rg --column --line-number --no-heading --color=always --smart-case --no-ignore -- {q} gists stars || true";
+const LIST_CMD = "rg --files --no-ignore gists stars";
 const RELOAD_CMD = `if [ -n {q} ]; then ${GREP_CMD}; else ${LIST_CMD}; fi`;
 
 export async function run(command: CommandArgs, context: CommandContext): Promise<number> {
   const err = (text: string) => writeText(context.stderr, text);
+  const out = (text: string) => writeText(context.stdout, text);
+  const flags = parseArgs([...command.args], { boolean: ["path"], alias: { p: "path" } });
 
   const config = await requireConfig(context);
   if (config === undefined) {
@@ -33,7 +37,7 @@ export async function run(command: CommandArgs, context: CommandContext): Promis
     return 1;
   }
 
-  const query = command.args.join(" ");
+  const query = flags._.map(String).join(" ");
   const picked = await context.runner("fzf", [
     "--ansi",
     "--disabled", // fzf does no filtering itself; rg (via reload) is the matcher
@@ -62,5 +66,9 @@ export async function run(command: CommandArgs, context: CommandContext): Promis
     return 0;
   }
   const [path, line] = selection.split(":");
+  if (flags.path) {
+    await out(`${resolve(join(config.repo, path))}\n`);
+    return 0;
+  }
   return await openEditor(context, config.repo, path, line);
 }
