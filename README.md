@@ -71,22 +71,6 @@ gistan pull                        # after editing a gist in the browser: takes 
 gistan doctor                      # after rm-ing a file or a gist by hand
 ```
 
-## Commands
-See `gistan --help` .
-
-- `init` — set up a local gist repo (no remote is created; push is up to you)
-- `import` — import existing gists into the local repo (`--limit N` for a trial batch)
-- `new` / `edit` / `list` / `rm` — daily snippet operations
-- `search` — live full-text search (rg + fzf); empty query lists files
-- `publish` / `unpublish` — manage the gist side of a snippet
-- `pull` — take remote gist edits into the repo (conflicts prompt with a diff)
-- `status` — publish/drift overview (local by default; `--remote` checks gist.github.com)
-- `doctor` — interactive repair of index/remote inconsistencies
-- `sync` / `root` — git convenience and shell interop
-
-Running bare `gistan` opens search directly.
-
-
 ## Development
 ### Depends
 - mise 2026+
@@ -95,14 +79,15 @@ Running bare `gistan` opens search directly.
 ### Structure
 ```text
 .
-├ deno.json              … Deno tasks, formatter/linter settings, imports
+├ deno.json       … Deno tasks, formatter/linter settings, imports
 ├ src/
-│  ├ main.ts             … CLI entrypoint and subcommand dispatch
-│  ├ main_test.ts        … Dispatch-focused unit tests
-│  ├ commands/           … one module per subcommand (+ shared helpers)
-│  └ core/               … config / index / reconcile engine / gh adapter
-├ docs/                  … ADR / SPEC / TASK documents
-└ mise.toml              … Toolchain pinning
+│  ├ main.ts      … CLI entrypoint and subcommand dispatch
+│  ├ main_test.ts … Dispatch-focused unit tests
+│  ├ commands/    … one module per subcommand (+ shared helpers)
+│  └ core/        … config / index / reconcile engine / gh adapter
+├ docs/           … ADR / SPEC / TASK documents
+├ scripts/        … development scripts
+└ mise.toml       … Toolchain pinning
 ```
 
 ### Commands
