@@ -47,13 +47,13 @@ defined as a local tool alias.
 
 ## Usage
 
-Prerequisites: `gh` authenticated with gist scope, plus `rg`, `fzf`, and `gitleaks`.
+Prerequisites: `gh` authenticated with gist scope, plus `rg` and `fzf`.
 
 ```sh
 gistan root init ~/gistan-repo     # scaffold the gist repo
-gistan import                      # import existing gists + gitleaks scan
+gistan import                      # import existing gists into gists/
 
-gistan new -d "desc" hello.md      # create gists/hello.md with description
+gistan new -d "desc" hello.md      # create gists/hello/hello.md with description
 gistan new tools/helper.ts         # adds gists/tools/helper.ts
 gistan search hello                # fuzzy pick by `hello`
 gistan list                        # list gists/
@@ -71,14 +71,23 @@ gistan rm hello/hello.md           # delete one file; asks if it is the last fil
 
 Daily operations above never touch the repo's own git history — they only read/write files and talk
 to `gist.github.com` via `gh`. Setup and origin git housekeeping (pushing/pulling the notes repo
-itself, not gists) live under `gistan root` instead, since conflating the two was confusing
-(`gistan sync` is gone):
+itself, not gists) live under `gistan root` instead, since conflating the two was confusing.
 
 ```sh
 gistan root path                   # print the repo's absolute path, e.g. cd $(gistan root path)
 gistan root commit -m "notes"      # git add -A + commit (omit -m for an auto message)
 gistan root push                   # git push
 gistan root pull                   # git pull --rebase
+```
+
+### Composing with other tools
+
+The repo is plain files, so any CLI composes through the repo path — gistan bundles no scanners or
+other integrations itself. For example, scan for secrets before committing or publishing:
+
+```sh
+gitleaks dir $(gistan root path) --no-banner   # secret scan (brew install gitleaks)
+rg -l TODO $(gistan root path)/gists           # or anything else that walks files
 ```
 
 ## Development
@@ -100,8 +109,7 @@ Important rules:
 
 gistan ships as a single self-contained binary (`deno compile` embeds the runtime, ~80MB). Nothing
 on the target machine needs Deno, but runtime integrations still require external CLIs: `gh`
-(authenticated, gist scope), `git`, `rg` + `fzf` (search/edit/rm picks), and `gitleaks` (import
-only).
+(authenticated, gist scope), `git`, and `rg` + `fzf` (search/edit/rm picks).
 
 ```sh
 # 1. Bump VERSION, run check/test, and build all release assets.

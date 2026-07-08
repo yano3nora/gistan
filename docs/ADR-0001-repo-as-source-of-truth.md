@@ -88,7 +88,8 @@
 ## Migration Notes
 
 - 既存の約 753 gist を `import` で repo へ一括取り込みする (一度きり)
-- **import 時に secret スキャン (gitleaks 等) を必須とする**。public gist として書いた当時と「repo に集約して agent に食わせる」今後ではリスク面が変わるため
+- ~~**import 時に secret スキャン (gitleaks 等) を必須とする**。public gist として書いた当時と「repo に集約して agent に食わせる」今後ではリスク面が変わるため~~
+  - **2026-07-08 改訂: gistan は gitleaks への依存を持たない**。repo は plain なファイル/dir であり、scan は `gitleaks dir $(gistan root path)` のように外部から合成できるため、CLI が scanner と結合する必要がない (「CLI は糖衣であり門番ではない」の原則を優先)。また旧実装の scan は import 完了後の advisory 警告にすぎず、必須依存に見合う防御になっていなかった。secret scan は利用者が任意で行う運用とし、README Usage に連携例を記載する
 
 ## Open Questions
 

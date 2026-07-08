@@ -35,12 +35,6 @@ export const DEPS: readonly DepSpec[] = [
     required: false,
     hint: "needed by `gistan search` (brew install fzf)",
   },
-  {
-    name: "gitleaks",
-    probeArgs: ["version"],
-    required: false,
-    hint: "needed by `gistan import` secret scan (brew install gitleaks)",
-  },
 ];
 
 export interface DepsReport {

@@ -3,7 +3,7 @@
 ## Overview
 
 - gist を集約する repo (= gist repo) の構成・運用を補助する CLI「gistan」。体験の目標は「Zenn の GitHub 連携の gist 版」
-- 技術スタック: Deno + TypeScript。外部 CLI (gh / git / rg / fzf / gitleaks) の糊として実装し、配布は `deno compile` 単一バイナリ
+- 技術スタック: Deno + TypeScript。外部 CLI (gh / git / rg / fzf) の糊として実装し、配布は `deno compile` 単一バイナリ
 - 最重要ドキュメント: `docs/ADR-0001-repo-as-source-of-truth.md` / `docs/ADR-0002-one-directory-one-gist.md` / `docs/SPEC-0001-gistan-cli.md`
 
 ## Role & Objective

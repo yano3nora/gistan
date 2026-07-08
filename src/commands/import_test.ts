@@ -7,7 +7,6 @@ import { run } from "./import.ts";
 function importRunner(items: unknown[], details: Record<string, unknown>): Runner {
   let listed = false;
   return (cmd, args) => {
-    if (cmd === "gitleaks") return Promise.resolve({ code: 0, stdout: "", stderr: "" });
     if (cmd === "gh" && args[1]?.startsWith("gists?")) {
       if (listed) return Promise.resolve({ code: 0, stdout: "[]", stderr: "" });
       listed = true;
@@ -131,16 +130,6 @@ Deno.test("import warns and skips gist containing reserved description filename"
   assertEquals(await run({ name: "import", args: [] }, io.context), 0);
   assert(io.stderr.includes("reserved .description.txt"));
   assert(io.stdout.includes("0 imported, 1 skipped"));
-});
-
-Deno.test("import fails if gitleaks is missing", async () => {
-  const { home } = await fixture();
-  const io = memoryContext(
-    (cmd) => Promise.resolve({ code: cmd === "gitleaks" ? 127 : 0, stdout: "", stderr: "" }),
-    home,
-  );
-  assertEquals(await run({ name: "import", args: [] }, io.context), 1);
-  assert(io.stderr.includes("gitleaks is required"));
 });
 
 Deno.test("import returns error for invalid limit", async () => {

@@ -1,7 +1,6 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { join } from "@std/path";
 import { slugify } from "../core/description.ts";
-import { checkDeps, DEPS } from "../core/deps.ts";
 import type { GistSummary } from "../core/gh.ts";
 import { getGistFiles, listOwnGistSummaries } from "../core/gh.ts";
 import { contentHash, DESCRIPTION_FILE, textHash } from "../core/snippets.ts";
@@ -22,11 +21,6 @@ export async function run(command: CommandArgs, context: CommandContext): Promis
   }
   const config = await requireConfig(context);
   if (!config) return 1;
-  const gitleaks = await checkDeps(context.runner, DEPS.filter((d) => d.name === "gitleaks"));
-  if (gitleaks.present.length === 0) {
-    await err("error: gitleaks is required for import — brew install gitleaks\n");
-    return 1;
-  }
   const summaries = await listOwnGistSummaries(
     context.runner,
     (p, t) => out(`fetching gist list… page ${p} (${t} so far)\n`),
@@ -35,9 +29,16 @@ export async function run(command: CommandArgs, context: CommandContext): Promis
   let state = await loadState(config.repo);
   const importedIds = new Set(Object.values(state.gists).map((e) => e.id));
   let imported = 0, skipped = 0, failed = 0;
-  for (const gist of targets) {
+  for (const [i, gist] of targets.entries()) {
+    // Already-indexed ids skip instantly with no output so re-runs stay quiet;
+    // everything past this line hits the network, so announce progress first.
+    if (importedIds.has(gist.id)) {
+      skipped++;
+      continue;
+    }
+    await out(`importing ${gist.id} (${i + 1}/${targets.length})…\n`);
     try {
-      const r = await importOne(config.repo, state, importedIds, gist, context, err);
+      const r = await importOne(config.repo, state, gist, context, err);
       if (r === "skipped") skipped++;
       else {
         state = r;
@@ -53,23 +54,16 @@ export async function run(command: CommandArgs, context: CommandContext): Promis
     }
   }
   await out(`done: ${imported} imported, ${skipped} skipped, ${failed} failed\n`);
-  const scan = await context.runner("gitleaks", ["dir", config.repo, "--no-banner"]);
-  if (scan.code !== 0) {
-    await err(`${scan.stdout}${scan.stderr}\nerror: potential secrets detected — do NOT commit\n`);
-    return 1;
-  }
   return failed > 0 ? 1 : 0;
 }
 
 async function importOne(
   repo: string,
   state: State,
-  importedIds: ReadonlySet<string>,
   gist: GistSummary,
   context: CommandContext,
   err: (t: string) => Promise<void>,
 ): Promise<State | "skipped"> {
-  if (importedIds.has(gist.id)) return "skipped";
   const files = await getGistFiles(context.runner, gist.id);
   if (files.some((f) => f.filename === DESCRIPTION_FILE)) {
     await err(`warn: ${gist.id} contains reserved ${DESCRIPTION_FILE}; skipped\n`);
