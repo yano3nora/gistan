@@ -1,5 +1,5 @@
-import { parseArgs } from "@std/cli/parse-args";
 import { run as runEdit } from "./commands/edit.ts";
+import { run as runGrep } from "./commands/grep.ts";
 import { run as runImport } from "./commands/import.ts";
 import { run as runList } from "./commands/list.ts";
 import { run as runNew } from "./commands/new.ts";
@@ -8,6 +8,7 @@ import { run as runPull } from "./commands/pull.ts";
 import { run as runRm } from "./commands/rm.ts";
 import { run as runRoot } from "./commands/root.ts";
 import { run as runSearch } from "./commands/search.ts";
+import { runSearchRender } from "./commands/search_render.ts";
 import { run as runStatus } from "./commands/status.ts";
 import { run as runUnpublish } from "./commands/unpublish.ts";
 import type { CommandContext, CommandHandler, CommandName } from "./commands/types.ts";
@@ -17,7 +18,8 @@ import { systemRunner } from "./core/proc.ts";
 export const VERSION = "gistan 0.3.0";
 export const COMMAND_DESCRIPTIONS: Record<CommandName, string> = {
   new: "Create a file under gists/<dir>/.",
-  search: "Search gists and stars.",
+  search: "Document-unit search across gists and stars.",
+  grep: "Line-level regex grep across gists and stars.",
   edit: "Open a gist file.",
   list: "List gist directories.",
   rm: "Delete a gist file.",
@@ -26,11 +28,12 @@ export const COMMAND_DESCRIPTIONS: Record<CommandName, string> = {
   pull: "Pull remote gist files.",
   status: "Show drift status; --fix repairs.",
   import: "Import existing gists.",
-  root: "Manage the gist repo: init / path / commit / push / pull.",
+  root: "Manage the gist repo: init / path / commit / push / pull / status.",
 };
 const COMMANDS: Record<CommandName, CommandHandler> = {
   new: runNew,
   search: runSearch,
+  grep: runGrep,
   edit: runEdit,
   list: runList,
   rm: runRm,
@@ -70,7 +73,7 @@ function defaultContext(): CommandContext {
   };
 }
 export function usage(): string {
-  return `gistan - manage a repo-backed gist collection\n\nUsage:\n  gistan [--help|-h]\n  gistan --version\n  gistan <command> [args...]\n\nCommands:\n${
+  return `gistan - manage a repo-backed gist collection\n\nUsage:\n  gistan [--help|-h]\n  gistan --version\n  gistan <command> [args...]\n  gistan <anything else>      Sugar: falls back to \`gistan search <args>\`.\n\nCommands:\n${
     Object.entries(COMMAND_DESCRIPTIONS).map(([n, d]) => `  ${n.padEnd(10)} ${d}`).join("\n")
   }\n`;
 }
@@ -78,32 +81,46 @@ export function resolveCommand(name: string | undefined): CommandName | undefine
   if (name === undefined) return undefined;
   return Object.hasOwn(COMMAND_DESCRIPTIONS, name) ? name as CommandName : undefined;
 }
+/**
+ * Dispatch is decided on argv[0] BEFORE any flag parsing (TASK-260708): the
+ * old code ran std parseArgs first, which happily swallowed a leading flag
+ * like `-p` meant for `search` (`gistan -p foo` never reached search). Order
+ * matters here — removed-command hints must win over the search fallback so
+ * `gistan init` still guides the user instead of quietly opening fzf.
+ */
 export async function run(argv: readonly string[], options: RunOptions = {}): Promise<number> {
   const context = options.context ?? defaultContext();
   const commands = { ...COMMANDS, ...options.commands };
-  const parsed = parseArgs([...argv], {
-    boolean: ["help", "version"],
-    alias: { help: "h" },
-    stopEarly: true,
-  });
-  if (parsed.help) {
+  const [first, ...rest] = argv;
+
+  if (first === undefined) {
+    return await commands.search({ name: "search", args: [] }, context);
+  }
+  if (first === "-h" || first === "--help") {
     await writeText(context.stdout, usage());
     return 0;
   }
-  if (parsed.version) {
+  if (first === "--version") {
     await writeText(context.stdout, `${VERSION}\n`);
     return 0;
   }
-  const [rawCommand, ...commandArgs] = parsed._.map(String);
-  if (rawCommand !== undefined && Object.hasOwn(REMOVED_COMMAND_HINTS, rawCommand)) {
-    await writeText(context.stderr, REMOVED_COMMAND_HINTS[rawCommand]);
+  if (Object.hasOwn(REMOVED_COMMAND_HINTS, first)) {
+    await writeText(context.stderr, REMOVED_COMMAND_HINTS[first]);
     return 2;
   }
-  const commandName = rawCommand === undefined ? "search" : resolveCommand(rawCommand);
-  if (commandName === undefined) {
-    await writeText(context.stderr, usage());
-    return 2;
+  // Hidden renderer behind `gistan search` (fzf's reload bind calls it on
+  // every keystroke); deliberately absent from COMMAND_DESCRIPTIONS/usage
+  // and dispatched before the search fallback would swallow it.
+  if (first === "__search-render") {
+    return await runSearchRender(rest, context);
   }
-  return await commands[commandName]({ name: commandName, args: commandArgs }, context);
+  const commandName = resolveCommand(first);
+  if (commandName !== undefined) {
+    return await commands[commandName]({ name: commandName, args: rest }, context);
+  }
+  // Full sugar fallback: an unrecognized first argument (including a leading
+  // flag like `-p`) is not a usage error — the whole argv goes to search
+  // untouched, so `gistan -p foo` behaves as `gistan search -p foo`.
+  return await commands.search({ name: "search", args: [...argv] }, context);
 }
 if (import.meta.main) Deno.exit(await run(Deno.args));

@@ -3,6 +3,7 @@ import type { Runner } from "../core/proc.ts";
 export type CommandName =
   | "new"
   | "search"
+  | "grep"
   | "edit"
   | "list"
   | "rm"

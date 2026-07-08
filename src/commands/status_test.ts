@@ -138,3 +138,58 @@ Deno.test("status filter limits output to one dir", async () => {
   assert(io.stdout.includes("one"));
   assertEquals(io.stdout.includes("two"), false);
 });
+
+// -- default hidden conditions / --all / dirname filter (TASK-260708) -------
+
+Deno.test("status default hides a published gist (offline: remote-unknown), but the summary still prints", async () => {
+  // published() has no --remote, so "one" reconciles to remote-unknown
+  // (displayed as "published") rather than in-sync — still in the hidden set.
+  const { home } = await published();
+  const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home);
+  assertEquals(await run({ name: "status", args: [] }, io.context), 0);
+  assertEquals(io.stdout.includes("one"), false);
+  assert(io.stdout.includes("1 gist(s): 1 published"));
+});
+
+Deno.test("status default shows drift conditions alongside a hidden published majority", async () => {
+  const { home, repo } = await published(); // "one" reconciles to remote-unknown/published
+  await Deno.mkdir(join(repo, "gists", "two"), { recursive: true }); // unpublished: not hidden
+  await Deno.writeTextFile(join(repo, "gists", "two", "b.md"), "B");
+  const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home);
+  assertEquals(await run({ name: "status", args: [] }, io.context), 0);
+  assertEquals(io.stdout.includes("one"), false);
+  assert(io.stdout.includes("two"));
+  assert(io.stdout.includes("2 gist(s): 1 published, 1 unpublished"));
+});
+
+Deno.test("status --remote also hides a genuinely in-sync gist by default, --all shows it", async () => {
+  const { home } = await published();
+  const inSyncRunner = (cmd: string, args: readonly string[]) => {
+    if (cmd === "gh" && args[1] === "gists?per_page=100") {
+      return Promise.resolve({ code: 0, stdout: `gid\t${AT}\ttrue\n`, stderr: "" });
+    }
+    return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+  };
+  const hidden = memoryContext(inSyncRunner, home);
+  assertEquals(await run({ name: "status", args: ["--remote"] }, hidden.context), 0);
+  assertEquals(hidden.stdout.includes("one"), false);
+  assert(hidden.stdout.includes("1 gist(s): 1 in-sync"));
+
+  const shown = memoryContext(inSyncRunner, home);
+  assertEquals(await run({ name: "status", args: ["--remote", "--all"] }, shown.context), 0);
+  assert(shown.stdout.includes("one"));
+});
+
+Deno.test("status --all restores the full listing, including a hidden published gist", async () => {
+  const { home } = await published();
+  const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home);
+  assertEquals(await run({ name: "status", args: ["--all"] }, io.context), 0);
+  assert(io.stdout.includes("one"));
+});
+
+Deno.test("a dirname filter always shows its item even when in-sync", async () => {
+  const { home } = await published();
+  const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home);
+  assertEquals(await run({ name: "status", args: ["one"] }, io.context), 0);
+  assert(io.stdout.includes("one"));
+});

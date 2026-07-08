@@ -1,6 +1,8 @@
 import { basename } from "@std/path";
 import type { Config } from "../core/config.ts";
 import { loadConfig } from "../core/config.ts";
+import { gistUrl } from "../core/gh.ts";
+import { loadState } from "../core/state.ts";
 import type { CommandContext } from "./types.ts";
 import { writeText } from "./types.ts";
 
@@ -62,6 +64,56 @@ export async function pickFile(
   }
   const path = picked.stdout.split("\n").at(0)?.trim();
   return { path: path === "" ? undefined : path, failed: false };
+}
+
+/**
+ * shift-up / shift-down scroll the preview pane; ctrl-u clears the query
+ * (readline muscle memory — an earlier ctrl-u:preview-scroll bind shadowed
+ * it and got in the way of retyping a search). Shared by search and grep.
+ */
+export const PREVIEW_SCROLL_BIND =
+  "shift-up:preview-half-page-up,shift-down:preview-half-page-down,ctrl-u:clear-query";
+
+const OPENER = Deno.build.os === "darwin" ? "open" : "xdg-open";
+
+/**
+ * ctrl-o opens the selected item's gist in the browser without leaving fzf
+ * (search and grep share this bind). The dirname -> gist id mapping comes
+ * from a temp file (one "dirname\tid" line per index entry, see
+ * writeGistMapFile) so the bind's sh only needs an awk lookup — no JSON
+ * parsing in shell. Unpublished dirs (absent from the map) and stars/ paths
+ * are silent no-ops; stars will need the v3 `stars/<owner>/<gist-id>/`
+ * layout to derive an id from the path (tracked in TASK-260706). {1} is the
+ * gists/-stripped display path with either delimiter (`:` in grep, tab in
+ * search): the first segment up to `/` is the dirname in both. The body
+ * deliberately contains no parentheses or brackets (backticks instead of
+ * `$()`, `test` instead of `[`): fzf's execute-silent(...) arg parsing
+ * chokes on unbalanced delimiters inside the body.
+ */
+export function browseBind(mapFile: string): string {
+  return 'ctrl-o:execute-silent(p={1}; d=${p%%/*}; test "$d" = stars && exit 0; ' +
+    `id=\`awk -F'\\t' -v d="$d" '$1==d {print $2}' "${mapFile}"\`; ` +
+    `test -n "$id" && ${OPENER} "${gistUrl("$id")}" || true)`;
+}
+
+/**
+ * Writes the dirname -> gist id map consumed by browseBind's awk lookup.
+ * Callers must remove the returned temp file once fzf exits (a write failure
+ * cleans up here so they never see a half-created file).
+ */
+export async function writeGistMapFile(repo: string): Promise<string> {
+  const state = await loadState(repo);
+  const mapFile = await Deno.makeTempFile({ prefix: "gistan-search-", suffix: ".tsv" });
+  try {
+    await Deno.writeTextFile(
+      mapFile,
+      Object.entries(state.gists).map(([dirname, entry]) => `${dirname}\t${entry.id}\n`).join(""),
+    );
+  } catch (error) {
+    await Deno.remove(mapFile).catch(() => {});
+    throw error;
+  }
+  return mapFile;
 }
 
 /**

@@ -55,12 +55,15 @@ gistan import                      # import existing gists into gists/
 
 gistan new -d "desc" hello.md      # create gists/hello/hello.md with description
 gistan new tools/helper.ts         # adds gists/tools/helper.ts
-gistan search hello                # fuzzy pick by `hello`
+gistan search deno deploy !wip     # document search: space = AND, !term = exclude, rows are path:line: excerpt
+gistan hello                       # sugar: unrecognized input falls back to `gistan search hello`
+gistan grep 'error\s+handling'     # line-level regex grep when you need the exact matching line
 gistan list                        # list gists/
 
 gistan publish hello               # publishes gists/hello as one gist (secret by default)
 gistan publish hello --public      # public must be an explicit opt-in
-gistan status                      # check local drift
+gistan status                      # only conditions that need attention (like `git status`)
+gistan status --all                # the full listing, including in-sync/published gists
 gistan status --remote             # includes remote drift
 gistan pull hello                  # overwrite local dir from remote after confirmation on conflict
 gistan status --fix                # interactive fix of drifts
@@ -78,6 +81,7 @@ gistan root path                   # print the repo's absolute path, e.g. cd $(g
 gistan root commit -m "notes"      # git add -A + commit (omit -m for an auto message)
 gistan root push                   # git push
 gistan root pull                   # git pull --rebase
+gistan root status                 # git status (same no-rewrap passthrough as push/pull)
 ```
 
 ### Composing with other tools
@@ -93,9 +97,9 @@ rg -l TODO $(gistan root path)/gists           # or anything else that walks fil
 ## Development
 
 ```sh
-deno task check
-deno task test
-deno task compile
+mise exec -- deno task check
+mise exec -- deno task test
+mise exec -- deno task compile
 ```
 
 Important rules:
@@ -104,6 +108,12 @@ Important rules:
 - `status` / `pull` / `publish` drift judgment must share `src/core/reconcile.ts`.
 - Do not commit, push, create releases, or publish packages from the agent; humans decide external
   publication.
+
+### Test dev binary
+```sh
+mise exec -- deno task compile
+./gistan --version
+```
 
 ## Deployment
 

@@ -18,6 +18,7 @@ Usage:
   gistan root commit [-m <msg>] git add -A + commit.
   gistan root push               git push.
   gistan root pull               git pull --rebase.
+  gistan root status             git status.
 `;
 
 export async function run(command: CommandArgs, context: CommandContext): Promise<number> {
@@ -31,9 +32,11 @@ export async function run(command: CommandArgs, context: CommandContext): Promis
     case "commit":
       return await runCommit(rest, context);
     case "push":
-      return await runPushPull(["push"], context);
+      return await runGitPassthrough(["push"], context);
     case "pull":
-      return await runPushPull(["pull", "--rebase"], context);
+      return await runGitPassthrough(["pull", "--rebase"], context);
+    case "status":
+      return await runGitPassthrough(["status"], context);
     case undefined:
       await writeText(context.stdout, USAGE);
       return 0;
@@ -83,11 +86,15 @@ async function runCommit(args: readonly string[], context: CommandContext): Prom
 }
 
 /**
- * Thin `git -C <repo>` passthrough for push/pull: no remote-configured
- * check, no message re-wrapping — git's own exit code and stderr (e.g. "no
- * configured push destination") are the error message.
+ * Thin `git -C <repo>` passthrough for push/pull/status: no remote-configured
+ * check, no message re-wrapping — git's own exit code, stdout and stderr
+ * (e.g. "no configured push destination", or the status listing itself) are
+ * the output, verbatim.
  */
-async function runPushPull(gitArgs: readonly string[], context: CommandContext): Promise<number> {
+async function runGitPassthrough(
+  gitArgs: readonly string[],
+  context: CommandContext,
+): Promise<number> {
   const config = await requireConfig(context);
   if (config === undefined) return 1;
   const result = await context.runner("git", [...gitArgs], { cwd: config.repo });

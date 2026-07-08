@@ -11,7 +11,7 @@ import { writeText } from "./types.ts";
 export async function run(command: CommandArgs, context: CommandContext): Promise<number> {
   const out = (text: string) => writeText(context.stdout, text);
   const err = (text: string) => writeText(context.stderr, text);
-  const flags = parseArgs([...command.args], { boolean: ["remote", "fix"] });
+  const flags = parseArgs([...command.args], { boolean: ["remote", "fix", "all"] });
   const config = await requireConfig(context);
   if (!config) return 1;
   const scan = await scanGistDirs(config.repo);
@@ -42,10 +42,21 @@ export async function run(command: CommandArgs, context: CommandContext): Promis
     await out("no gists yet — create one under gists/<dirname>/\n");
     return 0;
   }
+  // Default listing hides `in-sync` / `remote-unknown` (= published), the
+  // same way `git status` only prints paths that need attention — at
+  // hundreds of gists, an all-in-sync majority buries the handful of drift
+  // lines that matter. `--all` restores the old full listing, and an
+  // explicit dirname filter always shows its one match regardless of
+  // condition (the user named it, so hiding it would be surprising).
+  const visible = flags.all || filter
+    ? items
+    : items.filter((item) => !HIDDEN_BY_DEFAULT.has(item.condition));
   const counts = new Map<string, number>();
   for (const item of items) {
     const base = baseLabel(item.condition);
     counts.set(base, (counts.get(base) ?? 0) + 1);
+  }
+  for (const item of visible) {
     await out(formatLine(item));
   }
   await out(
@@ -58,6 +69,7 @@ export async function run(command: CommandArgs, context: CommandContext): Promis
   }
   return 0;
 }
+const HIDDEN_BY_DEFAULT: ReadonlySet<GistCondition> = new Set(["in-sync", "remote-unknown"]);
 function baseLabel(c: GistCondition) {
   return c === "remote-unknown" ? "published" : c;
 }

@@ -30,6 +30,7 @@ Deno.test("root with no subcommand prints usage", async () => {
   assertEquals(await run({ name: "root", args: [] }, io.context), 0);
   assert(io.stdout.includes("gistan root init"));
   assert(io.stdout.includes("gistan root commit"));
+  assert(io.stdout.includes("gistan root status"));
 });
 
 Deno.test("root rejects an unknown subcommand", async () => {
@@ -227,4 +228,31 @@ Deno.test("root pull propagates a git failure verbatim", async () => {
 
   assertEquals(await run({ name: "root", args: ["pull"] }, io.context), 1);
   assertEquals(io.stderr, "fatal: couldn't find remote ref\n");
+});
+
+// -- root status -------------------------------------------------------------
+
+Deno.test("root status runs git status in the repo and returns its exit code", async () => {
+  const { home, repo } = await fixture();
+  const { runner, calls } = recordingRunner(() =>
+    Promise.resolve({ code: 0, stdout: "nothing to commit, working tree clean\n", stderr: "" })
+  );
+  const io = memoryContext(runner, home);
+
+  assertEquals(await run({ name: "root", args: ["status"] }, io.context), 0);
+  const status = calls.find((c) => c.cmd === "git");
+  assertEquals(status?.args, ["status"]);
+  assertEquals(status?.options?.cwd, repo);
+  assertEquals(io.stdout, "nothing to commit, working tree clean\n");
+});
+
+Deno.test("root status propagates git's exit code and stderr verbatim", async () => {
+  const { home } = await fixture();
+  const { runner } = recordingRunner(() =>
+    Promise.resolve({ code: 128, stdout: "", stderr: "fatal: not a git repository\n" })
+  );
+  const io = memoryContext(runner, home);
+
+  assertEquals(await run({ name: "root", args: ["status"] }, io.context), 128);
+  assertEquals(io.stderr, "fatal: not a git repository\n");
 });

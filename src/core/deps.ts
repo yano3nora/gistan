@@ -27,13 +27,13 @@ export const DEPS: readonly DepSpec[] = [
     name: "rg",
     probeArgs: ["--version"],
     required: false,
-    hint: "needed by `gistan search` (brew install ripgrep)",
+    hint: "needed by `gistan search` / `gistan grep` (brew install ripgrep)",
   },
   {
     name: "fzf",
     probeArgs: ["--version"],
     required: false,
-    hint: "needed by `gistan search` (brew install fzf)",
+    hint: "needed by `gistan search` / `gistan grep` (brew install fzf)",
   },
 ];
 

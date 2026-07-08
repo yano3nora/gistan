@@ -19,6 +19,7 @@ GitHub で star した gist が read-only mirror として local 検索に含ま
 - [ ] mirror 管理情報 (fetched_at 等) を `.gistan/cache/stars.json` に保存 (gitignore 済み)
 - [ ] `gistan pull --stars` — star mirror の更新 (pull 実装済み、フラグは v3 送りでエラー中)
 - [ ] search / edit の stars read-only 表示の実機確認
+- [ ] search の ctrl-o (gist URL をブラウザで開く) の stars 対応 — `stars/<owner>/<gist-id>/` 配置が入れば path から gist id を導出できる。現状 stars/* は no-op (TASK-260708 followup)
 
 ## testcases
 
