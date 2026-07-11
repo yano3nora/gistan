@@ -6,12 +6,12 @@ import { memoryContext } from "../testing.ts";
 export const AT = "2026-07-08T00:00:00Z";
 export const AT2 = "2026-07-09T00:00:00Z";
 
-export async function fixture() {
+export async function fixture(options: { viewer?: string } = {}) {
   const home = await Deno.makeTempDir();
   const repo = join(home, "repo");
   await Deno.mkdir(join(repo, "gists"), { recursive: true });
   await Deno.mkdir(join(repo, ".gistan"), { recursive: true });
-  await saveConfig(join(home, "config.toml"), { repo });
+  await saveConfig(join(home, "config.toml"), { repo, viewer: options.viewer });
   return { home, repo };
 }
 

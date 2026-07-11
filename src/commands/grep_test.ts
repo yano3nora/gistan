@@ -200,7 +200,7 @@ Deno.test("shift-up / shift-down scroll the preview; ctrl-u clears the query", a
   );
 });
 
-Deno.test("the preview command highlights matches over the whole file and tolerates a missing line field", async () => {
+Deno.test("the preview self-invokes __preview grep with the row's path and line", async () => {
   const { home } = await fixture();
   const { runner, calls } = grepRunner({ code: 0, stdout: "" });
   const io = memoryContext(runner, home, { editor: "vim" });
@@ -209,14 +209,26 @@ Deno.test("the preview command highlights matches over the whole file and tolera
   const fzf = calls.find((call) => call.cmd === "fzf" && call.args.includes("--disabled"));
   const previewIndex = fzf?.args.indexOf("--preview") ?? -1;
   const preview = fzf?.args[previewIndex + 1] ?? "";
-  assert(preview.includes("rg --color=always --passthru"));
-  // Resolves the stripped path back against gists/ when it doesn't exist as-is,
-  // then requires a regular file: an empty {1} (empty result list) would
-  // otherwise resolve to the gists/ directory and --passthru would dump it all.
-  assert(preview.includes('[ -f "$f" ] || f="gists/$f"'));
-  assert(preview.includes('[ -f "$f" ] || exit 0'));
-  // Guards the empty-{2} (filename-hit) case instead of feeding it into arithmetic.
-  assert(preview.includes('[ -n "$ln" ]'));
+  // bat token comes from the probe (the default mock runner answers exit 0).
+  assert(preview.includes("__preview grep bat {q} {1} {2}"));
+});
+
+Deno.test("ctrl-v hands the selection to config.viewer; unset viewer installs no bind", async () => {
+  const { home } = await fixture({ viewer: "leaf" });
+  const { runner, calls } = grepRunner({ code: 130, stdout: "" });
+  const io = memoryContext(runner, home, { editor: "vim" });
+  assertEquals(await run({ name: "grep", args: [] }, io.context), 0);
+  const fzf = calls.find((call) => call.cmd === "fzf" && call.args.includes("--disabled"));
+  const bind = fzf?.args.find((arg) => arg.startsWith("ctrl-v:execute("));
+  assert(bind !== undefined);
+  assert(bind.includes('leaf "$f"'));
+
+  const { home: home2 } = await fixture();
+  const { runner: runner2, calls: calls2 } = grepRunner({ code: 130, stdout: "" });
+  const io2 = memoryContext(runner2, home2, { editor: "vim" });
+  assertEquals(await run({ name: "grep", args: [] }, io2.context), 0);
+  const fzf2 = calls2.find((call) => call.cmd === "fzf" && call.args.includes("--disabled"));
+  assertEquals(fzf2?.args.some((arg) => arg.startsWith("ctrl-v:")), false);
 });
 
 // -- ctrl-o: open the selected item's gist in the browser --------------------

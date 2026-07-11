@@ -7,6 +7,7 @@ import { run as runPublish } from "./commands/publish.ts";
 import { run as runPull } from "./commands/pull.ts";
 import { run as runRm } from "./commands/rm.ts";
 import { run as runRoot } from "./commands/root.ts";
+import { runPreviewRender } from "./commands/preview_render.ts";
 import { run as runSearch } from "./commands/search.ts";
 import { runSearchRender } from "./commands/search_render.ts";
 import { run as runStatus } from "./commands/status.ts";
@@ -108,11 +109,15 @@ export async function run(argv: readonly string[], options: RunOptions = {}): Pr
     await writeText(context.stderr, REMOVED_COMMAND_HINTS[first]);
     return 2;
   }
-  // Hidden renderer behind `gistan search` (fzf's reload bind calls it on
-  // every keystroke); deliberately absent from COMMAND_DESCRIPTIONS/usage
-  // and dispatched before the search fallback would swallow it.
+  // Hidden renderers behind `gistan search` / `gistan grep` (fzf's reload
+  // and preview binds call them on every keystroke); deliberately absent
+  // from COMMAND_DESCRIPTIONS/usage and dispatched before the search
+  // fallback would swallow them.
   if (first === "__search-render") {
     return await runSearchRender(rest, context);
+  }
+  if (first === "__preview") {
+    return await runPreviewRender(rest, context);
   }
   const commandName = resolveCommand(first);
   if (commandName !== undefined) {

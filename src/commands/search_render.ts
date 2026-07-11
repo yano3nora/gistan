@@ -27,16 +27,26 @@ const RESET = "\x1b[0m";
 /** ~chars of context kept on each side of the first term hit in an excerpt. */
 const EXCERPT_RADIUS = 60;
 
+/**
+ * The one place the query syntax is parsed (also used by __preview):
+ * whitespace-split terms, `!term` = exclusion, everything is a literal.
+ */
+export function parseTerms(query: string): { positives: string[]; negatives: string[] } {
+  const terms = query.split(/\s+/).filter((term) => term !== "");
+  return {
+    positives: terms.filter((term) => !term.startsWith("!")),
+    negatives: terms.filter((term) => term.startsWith("!"))
+      .map((term) => term.slice(1))
+      .filter((term) => term !== ""),
+  };
+}
+
 export async function runSearchRender(
   args: readonly string[],
   context: CommandContext,
 ): Promise<number> {
   const query = args.join(" ");
-  const terms = query.split(/\s+/).filter((term) => term !== "");
-  const positives = terms.filter((term) => !term.startsWith("!"));
-  const negatives = terms.filter((term) => term.startsWith("!"))
-    .map((term) => term.slice(1))
-    .filter((term) => term !== "");
+  const { positives, negatives } = parseTerms(query);
 
   const files = await listFiles(context);
   // Zero positive terms (empty query, or only exclusions) = plain file list.

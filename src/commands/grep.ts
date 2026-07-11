@@ -3,12 +3,15 @@ import { resolve } from "@std/path";
 import { checkDeps, DEPS } from "../core/deps.ts";
 import {
   browseBind,
+  detectBat,
   FZF_ABORTED,
   FZF_NO_MATCH,
   openEditor,
   PREVIEW_SCROLL_BIND,
   requireConfig,
+  selfCommand,
   toRelPath,
+  viewerBind,
   writeGistMapFile,
 } from "./shared.ts";
 import type { CommandArgs, CommandContext } from "./types.ts";
@@ -51,22 +54,12 @@ const GREP_CMD = `{ ${FILE_HITS}; ${CONTENT_HITS}; } | sed 's|^gists/||' | ` +
 const RELOAD_CMD =
   `if [ -n {q} ]; then ${GREP_CMD}; else ${LIST_CMD} | sed 's|^gists/||' | sort; fi`;
 
-/**
- * Preview shows the whole file (not a fixed window) with query matches
- * highlighted via --passthru, scrolled to start ~5 lines above the match so
- * shift-up/shift-down can scroll either direction from there. Filename hits have
- * no `:line:` suffix, so {2} is empty for them — the offset guard below
- * defaults to the top of the file instead of feeding a blank value into
- * shell arithmetic (an fzf `--preview-window '+{2}-5'` offset breaks the
- * same way: verified against a real fzf session, it silently drops the
- * preview for that item rather than crashing, but still not acceptable).
- * {1} is the gists/-stripped path; resolve it the same way toRelPath does,
- * then require a regular file: an empty {1} (empty result list) would
- * otherwise resolve to the gists/ directory and --passthru would dump it.
- */
-const PREVIEW_CMD = 'f={1}; [ -f "$f" ] || f="gists/$f"; [ -f "$f" ] || exit 0; ln={2}; off=1; ' +
-  '[ -n "$ln" ] && [ "$ln" -gt 5 ] 2>/dev/null && off=$((ln - 5)); ' +
-  'rg --color=always --passthru -- {q} "$f" 2>/dev/null | tail -n +$off';
+// The preview is a gistan self-invocation (see preview_render.ts): the whole
+// file with {q}'s rg matches emphasized (spans come from `rg --json`), bat
+// syntax highlighting when installed, scrolled ~5 lines above the selected
+// row's own line {2} — empty for filename hits, where it falls back to the
+// first content match. An fzf `--preview-window '+{2}-5'` offset was tried
+// and silently drops the preview for empty {2} (verified in a real session).
 
 export async function run(command: CommandArgs, context: CommandContext): Promise<number> {
   const err = (text: string) => writeText(context.stderr, text);
@@ -89,6 +82,12 @@ export async function run(command: CommandArgs, context: CommandContext): Promis
   }
 
   const query = flags._.map(String).join(" ");
+  const bat = (await detectBat(context.runner)) ? "bat" : "nobat";
+  const previewCmd = selfCommand(
+    Deno.execPath(),
+    Deno.mainModule,
+    `__preview grep ${bat} {q} {1} {2}`,
+  );
   const mapFile = await writeGistMapFile(config.repo);
   let picked;
   try {
@@ -107,8 +106,9 @@ export async function run(command: CommandArgs, context: CommandContext): Promis
       PREVIEW_SCROLL_BIND,
       "--bind",
       browseBind(mapFile),
+      ...(config.viewer === undefined ? [] : ["--bind", viewerBind(config.viewer)]),
       "--preview",
-      PREVIEW_CMD,
+      previewCmd,
     ], { cwd: config.repo });
   } finally {
     // The map is only meaningful while fzf is running; never leave it behind.

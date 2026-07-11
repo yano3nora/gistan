@@ -243,6 +243,55 @@ Deno.test("search runs fzf disabled+ansi with self-render reload binds", async (
   assert(fzf.args.some((arg) => arg.startsWith("ctrl-o:execute-silent(")));
 });
 
+function previewArg(calls: readonly Call[]): string {
+  const fzf = fzfCall(calls);
+  if (fzf === undefined) return "";
+  return String(fzf.args[fzf.args.indexOf("--preview") + 1] ?? "");
+}
+
+Deno.test("the preview self-invokes __preview, passing the bat token from the probe", async () => {
+  // The default mock runner answers every probe with exit 0, so bat "exists".
+  const { home } = await fixture();
+  const { runner, calls } = searchRunner({ code: 130, stdout: "" });
+  const io = memoryContext(runner, home, { editor: "vim" });
+  assertEquals(await run({ name: "search", args: [] }, io.context), 0);
+  assert(previewArg(calls).includes("__preview search bat {q} {1}"));
+
+  const { home: home2 } = await fixture();
+  const calls2: Call[] = [];
+  const runner2: Runner = (cmd, args, options) => {
+    calls2.push({ cmd, args, options });
+    if (cmd === "bat") {
+      return Promise.resolve({ code: EXIT_COMMAND_NOT_FOUND, stdout: "", stderr: "" });
+    }
+    if (cmd === "fzf" && args.includes("--disabled")) {
+      return Promise.resolve({ code: 130, stdout: "", stderr: "" });
+    }
+    return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+  };
+  const io2 = memoryContext(runner2, home2, { editor: "vim" });
+  assertEquals(await run({ name: "search", args: [] }, io2.context), 0);
+  assert(previewArg(calls2).includes("__preview search nobat {q} {1}"));
+});
+
+Deno.test("ctrl-v hands the selection to config.viewer; unset viewer installs no bind", async () => {
+  const { home } = await fixture({ viewer: "leaf" });
+  const { runner, calls } = searchRunner({ code: 130, stdout: "" });
+  const io = memoryContext(runner, home, { editor: "vim" });
+  assertEquals(await run({ name: "search", args: [] }, io.context), 0);
+  const bind = fzfCall(calls)?.args.find((arg) => arg.startsWith("ctrl-v:execute("));
+  assert(bind !== undefined);
+  assert(bind.includes('leaf "$f"'));
+  // Same path resolution as the preview: display paths may lack gists/.
+  assert(bind.includes('test -f "$f" || f="gists/$f"'));
+
+  const { home: home2 } = await fixture();
+  const { runner: runner2, calls: calls2 } = searchRunner({ code: 130, stdout: "" });
+  const io2 = memoryContext(runner2, home2, { editor: "vim" });
+  assertEquals(await run({ name: "search", args: [] }, io2.context), 0);
+  assertEquals(fzfCall(calls2)?.args.some((arg) => arg.startsWith("ctrl-v:")), false);
+});
+
 Deno.test("a picked `path:line: excerpt` row opens the editor at that line", async () => {
   const { home } = await fixture();
   const { runner, calls } = searchRunner({ code: 0, stdout: "a/x.md:12: …some excerpt…\n" });
@@ -326,13 +375,7 @@ function mapFileFromArgs(args: readonly string[]): string | undefined {
   return bind.match(/\{print \$2\}' "([^"]+)"/)?.[1];
 }
 
-/** The preview writes term patterns to a temp file; its path follows `-f "` in the command. */
-function patternFileFromArgs(args: readonly string[]): string | undefined {
-  const previewIndex = args.indexOf("--preview");
-  return args[previewIndex + 1]?.match(/-F -f "([^"]+)"/)?.[1];
-}
-
-Deno.test("the map file mirrors the index and both temp files are removed after fzf exits", async () => {
+Deno.test("the map file mirrors the index and is removed after fzf exits", async () => {
   const { home, repo } = await fixture();
   await saveState(repo, {
     version: 2,
@@ -347,12 +390,10 @@ Deno.test("the map file mirrors the index and both temp files are removed after 
     },
   });
   let mapFile: string | undefined;
-  let patternFile: string | undefined;
   let contents: string | undefined;
   const runner: Runner = (cmd, args) => {
     if (cmd === "fzf" && args.includes("--disabled")) {
       mapFile = mapFileFromArgs(args);
-      patternFile = patternFileFromArgs(args);
       if (mapFile !== undefined) contents = Deno.readTextFileSync(mapFile);
       return Promise.resolve({ code: 130, stdout: "", stderr: "" });
     }
@@ -362,19 +403,16 @@ Deno.test("the map file mirrors the index and both temp files are removed after 
 
   assertEquals(await run({ name: "search", args: [] }, io.context), 0);
   assertEquals(contents, "alpha\tid-alpha\n");
-  assert(mapFile !== undefined && patternFile !== undefined);
+  assert(mapFile !== undefined);
   assertEquals(await exists(mapFile), false);
-  assertEquals(await exists(patternFile), false);
 });
 
-Deno.test("both temp files are removed even when fzf fails", async () => {
+Deno.test("the map file is removed even when fzf fails", async () => {
   const { home } = await fixture();
   let mapFile: string | undefined;
-  let patternFile: string | undefined;
   const runner: Runner = (cmd, args) => {
     if (cmd === "fzf" && args.includes("--disabled")) {
       mapFile = mapFileFromArgs(args);
-      patternFile = patternFileFromArgs(args);
       return Promise.resolve({ code: 2, stdout: "", stderr: "boom" });
     }
     return Promise.resolve({ code: 0, stdout: "", stderr: "" });
@@ -382,7 +420,6 @@ Deno.test("both temp files are removed even when fzf fails", async () => {
   const io = memoryContext(runner, home, { editor: "vim" });
 
   assertEquals(await run({ name: "search", args: [] }, io.context), 1);
-  assert(mapFile !== undefined && patternFile !== undefined);
+  assert(mapFile !== undefined);
   assertEquals(await exists(mapFile), false);
-  assertEquals(await exists(patternFile), false);
 });

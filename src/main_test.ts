@@ -211,3 +211,28 @@ Deno.test("__search-render dispatches to the hidden renderer, not the search fal
 Deno.test("__search-render is not advertised in usage()", () => {
   assertEquals(usage().includes("__search-render"), false);
 });
+
+Deno.test("__preview dispatches to the hidden preview renderer, not the search fallback", async () => {
+  const io = memoryContext();
+  let searchCalled = false;
+
+  // An empty {1} makes the renderer a silent no-op (exit 0); the search
+  // fallback would instead fail on the missing config (exit 1 + stderr).
+  const code = await run(["__preview", "search", "nobat", "query", ""], {
+    context: io.context,
+    commands: {
+      search() {
+        searchCalled = true;
+        return 1;
+      },
+    },
+  });
+
+  assertEquals(code, 0);
+  assertEquals(searchCalled, false);
+  assertEquals(io.stderr, "");
+});
+
+Deno.test("__preview is not advertised in usage()", () => {
+  assertEquals(usage().includes("__preview"), false);
+});

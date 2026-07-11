@@ -35,6 +35,12 @@ export const DEPS: readonly DepSpec[] = [
     required: false,
     hint: "needed by `gistan search` / `gistan grep` (brew install fzf)",
   },
+  {
+    name: "bat",
+    probeArgs: ["--version"],
+    required: false,
+    hint: "syntax-highlighted previews in `gistan search` / `gistan grep` (brew install bat)",
+  },
 ];
 
 export interface DepsReport {

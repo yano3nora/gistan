@@ -35,7 +35,8 @@ export async function run(command: CommandArgs, context: CommandContext): Promis
   const dir = resolve(requested ?? configured?.repo ?? join(context.home, "gistan"));
   if (!(await ensureRepoDir(dir, context))) return 1;
   await scaffold(dir);
-  await saveConfig(context.configPath, { repo: dir });
+  // Re-running init must not drop hand-edited optional keys (viewer).
+  await saveConfig(context.configPath, { repo: dir, viewer: configured?.viewer });
   await out(`ok: scaffolded ${dir} (gists/, stars/, .gistan/)\n`);
   await out(`ok: config written to ${context.configPath}\n`);
   return 0;

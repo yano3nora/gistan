@@ -47,7 +47,9 @@ defined as a local tool alias.
 
 ## Usage
 
-Prerequisites: `gh` authenticated with gist scope, plus `rg` and `fzf`.
+Prerequisites: `gh` authenticated with gist scope, plus `rg` and `fzf`. Optionally `bat` — when
+installed, search/grep previews get syntax highlighting, with query matches emphasized in reverse
+video on top of it.
 
 ```sh
 gistan root init ~/gistan-repo     # scaffold the gist repo
@@ -92,6 +94,18 @@ other integrations itself. For example, scan for secrets before committing or pu
 ```sh
 gitleaks dir $(gistan root path) --no-banner   # secret scan (brew install gitleaks)
 rg -l TODO $(gistan root path)/gists           # or anything else that walks files
+```
+
+One integration point is built in: set `viewer` in `~/.config/gistan/config.toml` and ctrl-v inside
+`gistan search` / `gistan grep` hands the selected file to that command (a markdown reader like
+`leaf` or `glow` fits well). Quitting the viewer drops you back into the result list, so
+browse → read → browse loops never leave fzf. The command must not contain parentheses (an fzf
+`execute()` parsing limitation).
+
+```toml
+# ~/.config/gistan/config.toml
+repo = "/Users/you/gistan-repo"
+viewer = "leaf"
 ```
 
 ## Development

@@ -4,6 +4,12 @@ import { dirname, join } from "@std/path";
 export interface Config {
   /** Absolute path to the gist repo (the markdown source of truth). */
   readonly repo: string;
+  /**
+   * Command the ctrl-t bind in `search` / `grep` hands the selected file to
+   * (e.g. "leaf", "glow -p"). Unset = the bind is not installed. Set by
+   * hand-editing config.toml; `root init` preserves it.
+   */
+  readonly viewer?: string;
 }
 
 export function defaultConfigPath(env: { HOME?: string; XDG_CONFIG_HOME?: string }): string {
@@ -22,14 +28,24 @@ export async function loadConfig(path: string): Promise<Config | undefined> {
     }
     throw error;
   }
-  const repo = parse(text).repo;
+  const parsed = parse(text);
+  const repo = parsed.repo;
   if (typeof repo !== "string" || repo.length === 0) {
     throw new Error(`invalid config at ${path}: "repo" must be a non-empty string`);
   }
-  return { repo };
+  const viewer = parsed.viewer;
+  if (viewer !== undefined && (typeof viewer !== "string" || viewer.length === 0)) {
+    throw new Error(`invalid config at ${path}: "viewer" must be a non-empty string`);
+  }
+  return viewer === undefined ? { repo } : { repo, viewer };
 }
 
 export async function saveConfig(path: string, config: Config): Promise<void> {
   await Deno.mkdir(dirname(path), { recursive: true });
-  await Deno.writeTextFile(path, stringify({ repo: config.repo }));
+  // Spell the keys out: stringify would serialize any extra Config fields,
+  // and an undefined viewer must be omitted rather than written as a key.
+  const body = config.viewer === undefined
+    ? { repo: config.repo }
+    : { repo: config.repo, viewer: config.viewer };
+  await Deno.writeTextFile(path, stringify(body));
 }

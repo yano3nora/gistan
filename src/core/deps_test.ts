@@ -15,7 +15,7 @@ Deno.test("classifies missing deps by requirement", async () => {
   const report = await checkDeps(runnerMissing(["gh", "fzf"]));
   assertEquals(report.missingRequired.map((dep) => dep.name), ["gh"]);
   assertEquals(report.missingOptional.map((dep) => dep.name), ["fzf"]);
-  assertEquals(report.present.map((dep) => dep.name), ["git", "rg"]);
+  assertEquals(report.present.map((dep) => dep.name), ["git", "rg", "bat"]);
 });
 
 Deno.test("treats non-zero exit codes other than 127 as present", async () => {

@@ -1,7 +1,9 @@
-import { basename } from "@std/path";
+import { basename, fromFileUrl } from "@std/path";
 import type { Config } from "../core/config.ts";
 import { loadConfig } from "../core/config.ts";
+import { checkDeps, DEPS } from "../core/deps.ts";
 import { gistUrl } from "../core/gh.ts";
+import type { Runner } from "../core/proc.ts";
 import { loadState } from "../core/state.ts";
 import type { CommandContext } from "./types.ts";
 import { writeText } from "./types.ts";
@@ -94,6 +96,45 @@ export function browseBind(mapFile: string): string {
   return 'ctrl-o:execute-silent(p={1}; d=${p%%/*}; test "$d" = stars && exit 0; ' +
     `id=\`awk -F'\\t' -v d="$d" '$1==d {print $2}' "${mapFile}"\`; ` +
     `test -n "$id" && ${OPENER} "${gistUrl("$id")}" || true)`;
+}
+
+/**
+ * ctrl-v ("view") hands the selected file to the user's configured viewer
+ * command (config.toml `viewer`, e.g. a markdown reader) without leaving
+ * fzf: execute() suspends fzf, the viewer takes the terminal, and quitting
+ * it drops back into the result list — a browse/read loop. ctrl-v is unbound
+ * in stock fzf and free of muscle-memory collisions (ctrl-t is the fzf
+ * shell file-widget, ctrl-o is our browser bind). {1} is resolved the
+ * same way the previews do it (display paths may lack the gists/ prefix);
+ * an empty {1} or a vanished file is a silent no-op. Same delimiter
+ * constraint as browseBind (`test`, no `[`/`$()`): fzf's execute(...) arg
+ * parsing chokes on unbalanced parens/brackets — which also means a viewer
+ * command containing them would break the bind; not guarded, just avoid it.
+ */
+export function viewerBind(viewer: string): string {
+  return `ctrl-v:execute(f={1}; test -f "$f" || f="gists/$f"; ` +
+    `test -f "$f" && ${viewer} "$f")`;
+}
+
+/** Whether bat is installed — picks the `bat|nobat` token in __preview commands. */
+export async function detectBat(runner: Runner): Promise<boolean> {
+  const report = await checkDeps(runner, DEPS.filter((dep) => dep.name === "bat"));
+  return report.present.length > 0;
+}
+
+/**
+ * A command string that re-invokes this gistan with `tail` appended — for
+ * fzf binds that call back into the CLI (`__search-render`, `__preview`).
+ * Under `deno run` (dev) execPath is the deno binary, so the entrypoint
+ * module and the permissions the renderers need must be spelled out; a
+ * compiled binary just calls itself. Paths are quoted for fzf's $SHELL -c.
+ */
+export function selfCommand(execPath: string, mainModule: string, tail: string): string {
+  if (basename(execPath) === "deno") {
+    return `"${execPath}" run --allow-read --allow-run --allow-env ` +
+      `"${fromFileUrl(mainModule)}" ${tail}`;
+  }
+  return `"${execPath}" ${tail}`;
 }
 
 /**
