@@ -101,21 +101,27 @@ const OPENER = Deno.build.os === "darwin" ? "open" : "xdg-open";
 
 /**
  * ctrl-o opens the selected item's gist in the browser without leaving fzf
- * (search and grep share this bind). The dirname -> gist id mapping comes
- * from a temp file (one "dirname\tid" line per index entry, see
- * writeGistMapFile) so the bind's sh only needs an awk lookup — no JSON
- * parsing in shell. Unpublished dirs (absent from the map) and stars/ paths
- * are silent no-ops; stars will need the v3 `stars/<owner>/<gist-id>/`
- * layout to derive an id from the path (tracked in TASK-260706). {1} is the
- * gists/-stripped display path with either delimiter (`:` in grep, tab in
- * search): the first segment up to `/` is the dirname in both. The body
- * deliberately contains no parentheses or brackets (backticks instead of
- * `$()`, `test` instead of `[`): fzf's execute-silent(...) arg parsing
- * chokes on unbalanced delimiters inside the body.
+ * (search and grep share this bind). {1} is the gists/-stripped, stars/-kept
+ * display path with either delimiter (`:` in grep, tab in search): the first
+ * segment up to `/` is the dirname for a gists/ path, or the literal `stars`
+ * for a mirror path. Two id sources depending on which:
+ *   - gists/<dirname>/...: dirname -> gist id comes from a temp file (one
+ *     "dirname\tid" line per index entry, see writeGistMapFile), looked up
+ *     via awk — no JSON parsing in shell.
+ *   - stars/<owner>/<gist-id>/...: the id is already the 3rd path segment
+ *     (v3 mirror layout, TASK-260706), peeled off with `${var#prefix}` /
+ *     `${var%%/*}` — no lookup file needed.
+ * Unpublished gists/ dirs (absent from the map) are the only remaining
+ * no-op. The body deliberately contains no parentheses or brackets
+ * (backticks instead of `$()`, `test` instead of `[`, `if/then/else/fi`
+ * instead of subshells): fzf's execute-silent(...) arg parsing chokes on
+ * unbalanced delimiters inside the body.
  */
 export function browseBind(mapFile: string): string {
-  return 'ctrl-o:execute-silent(p={1}; d=${p%%/*}; test "$d" = stars && exit 0; ' +
-    `id=\`awk -F'\\t' -v d="$d" '$1==d {print $2}' "${mapFile}"\`; ` +
+  const lookup = `awk -F'\\t' -v d="$d" '$1==d {print $2}' "${mapFile}"`;
+  return "ctrl-o:execute-silent(p={1}; d=${p%%/*}; " +
+    'if test "$d" = stars; then rest=${p#stars/}; rest=${rest#*/}; id=${rest%%/*}; ' +
+    `else id=\`${lookup}\`; fi; ` +
     `test -n "$id" && ${OPENER} "${gistUrl("$id")}" || true)`;
 }
 

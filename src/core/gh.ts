@@ -136,6 +136,9 @@ export interface GistDetailFile {
 export interface GistDetail {
   readonly description: string;
   readonly updated_at: string;
+  /** `.owner.login`, falls back to "unknown" (e.g. anonymous gists). Used by `star add` to
+   * pick the mirror path (stars/<owner>/<id>/). */
+  readonly owner: string;
   readonly files: readonly GistDetailFile[];
 }
 
@@ -147,15 +150,74 @@ export async function getGist(runner: Runner, id: string): Promise<GistDetail> {
   const data = JSON.parse(result.stdout) as {
     description?: string | null;
     updated_at?: string;
+    owner?: { login?: string | null } | null;
     files?: Record<string, GistDetailFile>;
   };
   return {
     description: data.description ?? "",
     updated_at: data.updated_at ?? "",
+    owner: data.owner?.login ?? "unknown",
     files: Object.values(data.files ?? {}),
   };
 }
 
 export async function getGistFiles(runner: Runner, id: string): Promise<GistDetailFile[]> {
   return [...(await getGist(runner, id)).files];
+}
+
+export interface StarredGistSummary {
+  readonly id: string;
+  /** `.owner.login`, falls back to "unknown" — determines the mirror path. */
+  readonly owner: string;
+  readonly description: string;
+  readonly updated_at: string;
+}
+
+/**
+ * `gists/starred` page loop, same shape as listOwnGistSummaries: the starred
+ * list carries enough metadata to drive the sync diff (id/owner/updated_at)
+ * but never file content, so `star sync` still needs a per-gist getGist call
+ * for anything it actually mirrors.
+ */
+export async function listStarredGists(
+  runner: Runner,
+  onPage?: (page: number, total: number) => Promise<void>,
+): Promise<StarredGistSummary[]> {
+  const all: StarredGistSummary[] = [];
+  for (let page = 1;; page++) {
+    const result = await runner("gh", ["api", `gists/starred?per_page=100&page=${page}`]);
+    if (result.code !== 0) {
+      throw new Error(
+        `gh api gists/starred failed: ${result.stderr.trim() || `exit ${result.code}`}`,
+      );
+    }
+    const items = JSON.parse(result.stdout) as Array<
+      {
+        id: string;
+        description: string | null;
+        updated_at: string;
+        owner?: { login?: string | null } | null;
+      }
+    >;
+    if (items.length === 0) break;
+    all.push(
+      ...items.map((item) => ({
+        id: item.id,
+        owner: item.owner?.login ?? "unknown",
+        description: item.description ?? "",
+        updated_at: item.updated_at,
+      })),
+    );
+    await onPage?.(page, all.length);
+    if (items.length < 100) break;
+  }
+  return all;
+}
+
+/** PUT gists/{id}/star — GitHub returns 204 no content on success. */
+export async function starGist(runner: Runner, id: string): Promise<void> {
+  const result = await runner("gh", ["api", `gists/${id}/star`, "--method", "PUT"]);
+  if (result.code !== 0) {
+    throw new Error(`gist star failed (${id}): ${result.stderr.trim() || `exit ${result.code}`}`);
+  }
 }

@@ -8,8 +8,9 @@ truth; GitHub Gist is only the explicit publish surface.
 ```text
 <gist-repo>/
 ├ gists/<dirname>/<files...>   # 1 directory = 1 gist
-├ stars/                       # read-only cache
-└ .gistan/state.json           # index v2
+├ stars/<owner>/<gist-id>/     # read-only mirror of starred gists (`gistan star sync`)
+├ .gistan/state.json           # index v2
+└ .gistan/cache/stars.json     # star mirror cache
 ```
 
 `gists/<dirname>/.description.txt` is reserved metadata. Its trimmed content becomes the gist
@@ -72,6 +73,9 @@ gistan status --fix                # interactive fix of drifts
 
 gistan unpublish hello             # delete remote gist, keep local dir
 gistan rm hello/hello.md           # delete one file; asks if it is the last file
+
+gistan star sync                   # mirror starred gists into stars/<owner>/<gist-id>/ (idempotent)
+gistan star add <gist-url>         # star a gist and mirror it immediately
 ```
 
 Daily operations above never touch the repo's own git history — they only read/write files and talk

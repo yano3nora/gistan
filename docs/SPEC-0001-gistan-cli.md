@@ -34,8 +34,9 @@ gistan は、gist を普通の git repo で管理するための Deno + TypeScri
 ```text
 <gist-repo>/
 ├ gists/<dirname>/<files...>   # depth 1 only。1 dir = 1 gist
-├ stars/                       # read-only cache。gitignore 対象
-└ .gistan/state.json           # index v2。commit 対象
+├ stars/<owner>/<gist-id>/     # read-only mirror。gitignore 対象
+├ .gistan/state.json           # index v2。commit 対象
+└ .gistan/cache/stars.json     # star mirror cache (`star sync`/`star add` が更新)。gitignore 対象
 ```
 
 - `gists/` 直下の裸ファイルは非管理。`status` が warn する
@@ -98,6 +99,8 @@ gistan root commit [-m <msg>]
 gistan root push
 gistan root pull
 gistan root status
+gistan star sync
+gistan star add <gist-url>
 ```
 
 ### Key behavior
@@ -110,11 +113,12 @@ gistan root status
 - `pull` は remote 内容で dir を上書きする。conflict は確認する。全件一括 pull は提供しない
 - `status` は既定 offline。`--remote` で remote drift を見る。`--fix` は旧 doctor 相当の対話修復で、doctor コマンドは存在しない。git status 同様、既定では対応が必要な condition (`unpublished` / `local-drift` / `remote-drift` / `conflict` / `remote-deleted` / `dir-missing`) だけ列挙し、`in-sync` と `remote-unknown` (= published) は隠す。`--all` で従来の全件列挙に戻る。dirname を指定した場合はその item を condition に関わらず表示する。summary 行 (`N gist(s): ...`) は常に出る (TASK-260708)
 - `import` は multi-file gist をそのまま `gists/<dirname>/` に取り込み、description が非空なら `.description.txt` を必ず作る。同じ gist id が index にあれば skip する
+- `star sync` は starred gist 一覧を `stars/<owner>/<gist-id>/` へ差分 mirror する (TASK-260706)。判定は `.gistan/cache/stars.json` の `updated_at` とミラー dir の存在で行い、両方揃っていれば `gists/{id}` の GET をスキップする冪等設計。starred から外れた gist の mirror dir / cache entry は確認なしで削除する — mirror は GitHub から再取得可能な cache であり、gist repo 本体 (index) とは削除の重みが違うため。`star add <gist-url|id>` は指定 gist を star (`PUT gists/{id}/star`) してその場で 1 件 mirror する。URL は `https://gist.github.com/<owner>/<id>`、`https://gist.github.com/<id>`、裸の `<id>` のいずれも末尾セグメントを id として受理する。`.description.txt` は mirror に置かない (予約名は gists/ の概念で、star の description は cache にのみ持つ)
 - `search` は document (= file) 単位の検索 (TASK-260708 followup 3)。fzf は `--disabled` + `--ansi` + `--layout=reverse` で動き、キーストローク毎の reload が gistan 自身の隠しサブコマンド `__search-render {q}` を呼んで一覧を TypeScript で描画する (sh 断片の quoting / zsh 依存を排除)。一覧の並びは renderer が決める (path ヒット群 → 本文のみ群、各段 path 昇順) ため、layout は明示的に top-down 固定 — fzf 素の bottom-up だと先頭 (= 上位) が画面最下段に来てしまう。query 仕様は search 独自の Google 風で fzf の演算子ではない:
   - **空白区切り = file 単位の順不同 AND**、`!term` = その term を含む file を除外。term は常に case-insensitive の literal (regex ではない。`'` `^` `$` も普通の文字)
   - マッチ対象は内容 + display path (dirname / filename)。一覧は 2 段構成: **display path に正 term を含む file 群が先、本文のみヒットの file 群が後** (dirname / filename ヒットの方が強いシグナル)。各段内は display path 昇順 — これ以上のスコアリング (出現回数等) は決定性・クラスタ性を壊すため行わない。行の形式は `display_path:line: ヒット前後の抜粋` (前後 ~60 文字、切れた端は `…`)。path のみヒットの file は path だけの行。display path は `gists/` を除去し `stars/` は残す。term のヒット箇所は色付けされる
   - 空 query (または正 term なし) は全 file の一覧
-  - Enter は選択行の `:line:` へそのまま jump して editor を開く。preview も自己呼び出し (`<self> __preview`) で TypeScript 描画: `bat` があれば syntax highlight を敷き (無ければ plain)、全 term の一致箇所を reverse video (SGR 7) で強調して最初の一致行付近へ位置合わせる。反転は色状態に触れないため bat の配色と共存できる (色での強調は ANSI と干渉するので不可)。preview pane は wrap がデフォルト (fzf の preview に横 scroll は存在しないため、折り返さないと長行の続きを読む手段がない)。shift-up / shift-down で scroll、ctrl-/ で wrap の toggle (コードや表の桁揃えを見たいとき用)。ctrl-u は query の全消去。ctrl-o は選択中 item の gist URL をブラウザで開く (fzf は抜けない。未 publish dir と `stars/*` は no-op)
+  - Enter は選択行の `:line:` へそのまま jump して editor を開く。preview も自己呼び出し (`<self> __preview`) で TypeScript 描画: `bat` があれば syntax highlight を敷き (無ければ plain)、全 term の一致箇所を reverse video (SGR 7) で強調して最初の一致行付近へ位置合わせる。反転は色状態に触れないため bat の配色と共存できる (色での強調は ANSI と干渉するので不可)。preview pane は wrap がデフォルト (fzf の preview に横 scroll は存在しないため、折り返さないと長行の続きを読む手段がない)。shift-up / shift-down で scroll、ctrl-/ で wrap の toggle (コードや表の桁揃えを見たいとき用)。ctrl-u は query の全消去。ctrl-o は選択中 item の gist URL をブラウザで開く (fzf は抜けない)。`stars/<owner>/<gist-id>/...` は path の 3rd segment がそのまま gist id なのでミラーからも開ける (v3, TASK-260706)。未 publish dir だけが no-op
   - ctrl-v は選択中 file を config の `viewer` コマンド (例: markdown viewer) に渡す。viewer を quit すると fzf に戻る。`viewer` 未設定なら bind 自体を張らない
 - `grep` は旧 search の行レベル regex 検索 (query 全体が 1 本の rg regex、キーストローク毎に再実行)。「一致行を正確に探す」場面用に温存。表示 (`gists/` 除去 + path sort)、preview (一致 span は `rg --json` から取得し、選択行 `{2}` 付近へ位置合わせ)、ctrl-o、ctrl-v、`--path|-p` は search と同等 (TASK-260708 followup 2)
 

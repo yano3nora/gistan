@@ -10,6 +10,7 @@ import { run as runRoot } from "./commands/root.ts";
 import { runPreviewRender } from "./commands/preview_render.ts";
 import { run as runSearch } from "./commands/search.ts";
 import { runSearchRender } from "./commands/search_render.ts";
+import { run as runStar } from "./commands/star.ts";
 import { run as runStatus } from "./commands/status.ts";
 import { run as runUnpublish } from "./commands/unpublish.ts";
 import type { CommandContext, CommandHandler, CommandName } from "./commands/types.ts";
@@ -30,6 +31,7 @@ export const COMMAND_DESCRIPTIONS: Record<CommandName, string> = {
   status: "Show drift status; --fix repairs.",
   import: "Import existing gists.",
   root: "Manage the gist repo: init / path / commit / push / pull / status.",
+  star: "Manage the star mirror: sync / add <url>.",
 };
 const COMMANDS: Record<CommandName, CommandHandler> = {
   new: runNew,
@@ -44,6 +46,7 @@ const COMMANDS: Record<CommandName, CommandHandler> = {
   status: runStatus,
   import: runImport,
   root: runRoot,
+  star: runStar,
 };
 
 /**

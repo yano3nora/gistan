@@ -258,10 +258,12 @@ Deno.test("ctrl-o is bound to a silent gist-URL opener fed by the dirname->id ma
   assert(bind !== undefined);
   const mapFile = mapFileFromBind(bind);
   assert(mapFile !== undefined && mapFile !== "");
-  // Same URL shape as gistUrl(), opener picked per OS, stars/ short-circuited.
+  // Same URL shape as gistUrl(), opener picked per OS; stars/ paths derive the
+  // id from their own 3rd path segment instead of the awk map (TASK-260706).
   const opener = Deno.build.os === "darwin" ? "open" : "xdg-open";
   assert(bind.includes(`${opener} "https://gist.github.com/$id"`));
-  assert(bind.includes('test "$d" = stars && exit 0'));
+  assert(bind.includes('if test "$d" = stars'));
+  assert(bind.includes("id=${rest%%/*}"));
   assert(bind.includes("awk -F'\\t'"));
 });
 

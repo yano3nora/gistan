@@ -12,7 +12,8 @@ export type CommandName =
   | "pull"
   | "status"
   | "import"
-  | "root";
+  | "root"
+  | "star";
 
 export interface CommandContext {
   readonly stdout: Pick<typeof Deno.stdout, "write">;
