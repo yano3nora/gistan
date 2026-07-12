@@ -28,7 +28,10 @@ reserved filenames.
 
 ```sh
 # e.g. use globally.
-mise use -g github:yano3nora/gistan@0
+mise use -g github:yano3nora/gistan
+
+# specify verison
+mise use -g github:yano3nora/gistan@0.1.0
 
 gistan --version
 ```
