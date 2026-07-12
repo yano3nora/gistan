@@ -82,7 +82,7 @@ function defaultContext(): CommandContext {
   };
 }
 export function usage(): string {
-  return `gistan - manage a repo-backed gist collection\n\nUsage:\n  gistan [--help|-h]\n  gistan --version\n  gistan <command> [args...]\n  gistan <anything else>      Sugar: falls back to \`gistan search <args>\`.\n\nCommands:\n${
+  return `gistan - manage a repo-backed gist collection\n\nUsage:\n  gistan [--help|-h]\n  gistan --version\n  gistan [--editor|-e <command>] <command> [args...]\n  gistan [--editor|-e <command>] <anything else>\n+                              Sugar: falls back to \`gistan search <args>\`.\n\nOptions:\n  -e, --editor <command>       Override $EDITOR for this invocation.\n\nCommands:\n${
     Object.entries(COMMAND_DESCRIPTIONS).map(([n, d]) => `  ${n.padEnd(10)} ${d}`).join("\n")
   }\n`;
 }
@@ -98,10 +98,18 @@ export function resolveCommand(name: string | undefined): CommandName | undefine
  * `gistan init` still guides the user instead of quietly opening fzf.
  */
 export async function run(argv: readonly string[], options: RunOptions = {}): Promise<number> {
-  const context = options.context ?? defaultContext();
+  const baseContext = options.context ?? defaultContext();
+  const editorOption = extractEditorOption(argv);
+  if (editorOption.error !== undefined) {
+    await writeText(baseContext.stderr, `error: ${editorOption.error}\n`);
+    return 2;
+  }
+  const context = editorOption.editor === undefined
+    ? baseContext
+    : { ...baseContext, editor: editorOption.editor };
   const commands = { ...COMMANDS, ...options.commands };
   try {
-    return await dispatch(argv, commands, context);
+    return await dispatch(editorOption.argv, commands, context);
   } catch (error) {
     // Commands wrap their own expected failures; whatever still reaches here
     // (an unreadable index, a bug) must exit with one friendly line, not a
@@ -112,6 +120,42 @@ export async function run(argv: readonly string[], options: RunOptions = {}): Pr
     );
     return 1;
   }
+}
+
+interface EditorOption {
+  readonly argv: readonly string[];
+  readonly editor?: string;
+  readonly error?: string;
+}
+
+/**
+ * Extracts the invocation-wide editor override before command dispatch so it
+ * works for explicit commands and search sugar alike. Only the first option is
+ * consumed; the editor is an executable path/name, not a shell command string.
+ */
+function extractEditorOption(argv: readonly string[]): EditorOption {
+  const rest: string[] = [];
+  let editor: string | undefined;
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "-e" || arg === "--editor") {
+      if (editor !== undefined) return { argv: rest, error: `${arg} specified more than once` };
+      const value = argv[++i];
+      if (value === undefined || value === "") {
+        return { argv: rest, error: `${arg} requires an editor command` };
+      }
+      editor = value;
+      continue;
+    }
+    if (arg.startsWith("--editor=")) {
+      if (editor !== undefined) return { argv: rest, error: "--editor specified more than once" };
+      editor = arg.slice("--editor=".length);
+      if (editor === "") return { argv: rest, error: "--editor requires an editor command" };
+      continue;
+    }
+    rest.push(arg);
+  }
+  return { argv: rest, editor };
 }
 
 async function dispatch(

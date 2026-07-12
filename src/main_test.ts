@@ -111,6 +111,33 @@ Deno.test("a leading flag reaches search untouched, e.g. `gistan -p foo` (TASK-2
   assertEquals(received, { name: "search", args: ["-p", "foo"] });
 });
 
+Deno.test("--editor/-e overrides the editor and is removed before explicit or sugar dispatch", async () => {
+  for (const argv of [["--editor", "nvim", "search", "foo"], ["foo", "-e", "nvim"]]) {
+    const io = memoryContext();
+    let received: CommandArgs | undefined;
+    let editor: string | undefined;
+    const code = await run(argv, {
+      context: io.context,
+      commands: {
+        search(command, context) {
+          received = command;
+          editor = context.editor;
+          return 0;
+        },
+      },
+    });
+    assertEquals(code, 0);
+    assertEquals(received, { name: "search", args: ["foo"] });
+    assertEquals(editor, "nvim");
+  }
+});
+
+Deno.test("--editor without a value is a usage error", async () => {
+  const io = memoryContext();
+  assertEquals(await run(["search", "--editor"], { context: io.context }), 2);
+  assert(io.stderr.includes("requires an editor command"));
+});
+
 Deno.test("`gistan s` is no longer an alias — it falls through to search as a query", async () => {
   const io = memoryContext();
   let received: CommandArgs | undefined;

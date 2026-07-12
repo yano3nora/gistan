@@ -73,7 +73,10 @@ export async function runPreviewRender(
   const hinted = /^[1-9][0-9]*$/.test(lineHint) ? Number(lineHint) : undefined;
   const anchor = hinted ?? firstSpanLine(spans);
   const start = anchor !== undefined && anchor > CONTEXT_ABOVE ? anchor - CONTEXT_ABOVE : 1;
-  const out = rendered.slice(start - 1);
+  const width = String(lines.length).length;
+  const out = rendered.slice(start - 1).map((line, i) =>
+    `${String(start + i).padStart(width)} │ ${line}`
+  );
   if (out.length > 0) await writeText(context.stdout, out.join("\n") + "\n");
   return 0;
 }

@@ -59,7 +59,7 @@ Deno.test("root init creates a local repo, scaffolds it, and is idempotent", asy
   assert(first.stdout.includes("initialized a local git repo"));
   assertEquals(
     JSON.parse(await Deno.readTextFile(pathJoin(repoDir, ".gistan", "state.json"))),
-    { version: 2, gists: {} },
+    { version: 3, gists: {}, locals: {} },
   );
   const gitignore = await Deno.readTextFile(pathJoin(repoDir, ".gitignore"));
   assert(gitignore.includes("stars/"));
@@ -69,6 +69,24 @@ Deno.test("root init creates a local repo, scaffolds it, and is idempotent", asy
   const second = memoryContext(runner, home);
   assertEquals(await run({ name: "root", args: ["init"] }, second.context), 0);
   assert(second.stdout.includes("using existing repo"));
+});
+
+Deno.test("root init repairs only the empty v2 index scaffolded by v0.7.0", async () => {
+  const home = await Deno.makeTempDir();
+  const repoDir = pathJoin(home, "repo");
+  await Deno.mkdir(pathJoin(repoDir, ".git"), { recursive: true });
+  await Deno.mkdir(pathJoin(repoDir, ".gistan"), { recursive: true });
+  await Deno.writeTextFile(
+    pathJoin(repoDir, ".gistan", "state.json"),
+    JSON.stringify({ version: 2, gists: {} }),
+  );
+
+  const io = memoryContext(okRunner(), home);
+  assertEquals(await run({ name: "root", args: ["init", repoDir] }, io.context), 0);
+  assertEquals(
+    JSON.parse(await Deno.readTextFile(pathJoin(repoDir, ".gistan", "state.json"))),
+    { version: 3, gists: {}, locals: {} },
+  );
 });
 
 Deno.test("root init fails fast when a required dependency is missing", async () => {

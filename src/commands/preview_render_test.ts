@@ -58,7 +58,7 @@ Deno.test("search preview emphasizes terms and starts ~5 lines above the first h
 
   assertEquals(await runPreviewRender(["search", "nobat", "deno", path], io.context), 0);
   const out = io.stdout.split("\n");
-  assertEquals(out[0], "line 3"); // 8 - 5
+  assertEquals(out[0], " 3 │ line 3"); // 8 - 5; width follows the 12-line file
   assert(io.stdout.includes(`${REV}deno${OFF}`));
 });
 
@@ -118,7 +118,7 @@ Deno.test("grep preview takes spans from rg --json (byte offsets, CJK-safe) and 
 
   assertEquals(await runPreviewRender(["grep", "nobat", "deno", path, "12"], io.context), 0);
   const out = io.stdout.split("\n");
-  assertEquals(out[0], "line 7"); // 12 - 5
+  assertEquals(out[0], " 7 │ line 7"); // 12 - 5
   assert(io.stdout.includes(`日本語 ${REV}deno${OFF} 日本語`));
 });
 
@@ -133,5 +133,5 @@ Deno.test("grep preview with an empty query shows the whole file untouched", asy
 
   assertEquals(await runPreviewRender(["grep", "nobat", "", path, ""], io.context), 0);
   assertEquals(rgRan, false);
-  assertEquals(io.stdout, "one\ntwo\n");
+  assertEquals(io.stdout, "1 │ one\n2 │ two\n");
 });

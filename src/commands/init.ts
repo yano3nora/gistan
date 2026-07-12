@@ -5,7 +5,7 @@ import { checkDeps } from "../core/deps.ts";
 import type { CommandArgs, CommandContext } from "./types.ts";
 import { writeText } from "./types.ts";
 
-const INITIAL_STATE = `${JSON.stringify({ version: 2, gists: {} }, null, 2)}\n`;
+const INITIAL_STATE = `${JSON.stringify({ version: 3, gists: {}, locals: {} }, null, 2)}\n`;
 const DEFAULT_TEMPLATE = "# {{title}}\n";
 const GITIGNORE_LINES = ["stars/", ".gistan/cache/"];
 
@@ -80,8 +80,33 @@ async function scaffold(dir: string): Promise<void> {
   await Deno.mkdir(join(dir, ".gistan", "templates"), { recursive: true });
   await writeIfAbsent(join(dir, "gists", ".gitkeep"), "");
   await writeIfAbsent(join(dir, ".gistan", "state.json"), INITIAL_STATE);
+  await repairEmptyV2State(join(dir, ".gistan", "state.json"));
   await writeIfAbsent(join(dir, ".gistan", "templates", "default.md"), DEFAULT_TEMPLATE);
   await ensureGitignoreLines(join(dir, ".gitignore"), GITIGNORE_LINES);
+}
+
+/**
+ * v0.7.0 accidentally scaffolded an empty v2 index that the same release
+ * refused to load. This exact empty shape contains no user data, so rerunning
+ * `root init` can repair it safely. Any populated/unknown v2 index is left
+ * untouched for loadState() to reject rather than attempting a lossy migration.
+ */
+async function repairEmptyV2State(path: string): Promise<void> {
+  let data: unknown;
+  try {
+    data = JSON.parse(await Deno.readTextFile(path));
+  } catch {
+    return;
+  }
+  if (
+    typeof data === "object" && data !== null &&
+    (data as { version?: unknown }).version === 2 &&
+    typeof (data as { gists?: unknown }).gists === "object" &&
+    (data as { gists: object }).gists !== null &&
+    Object.keys((data as { gists: object }).gists).length === 0
+  ) {
+    await Deno.writeTextFile(path, INITIAL_STATE);
+  }
 }
 async function writeIfAbsent(path: string, content: string) {
   try {

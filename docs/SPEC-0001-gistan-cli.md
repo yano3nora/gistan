@@ -190,10 +190,13 @@ gistan star add <gist-url>
     は行末に dim で補助表示し、同名 filename の判別に使う (description 未設定同士の同名は preview
     で判別する)。term のヒット箇所は色付けされる
   - 空 query (または正 term なし) は全 file の一覧
-  - Enter は選択行の `:line:` へそのまま jump して editor を開く。preview も自己呼び出し
+  - Enter は選択行の `:line:` へそのまま jump して editor を開く。editor は `$EDITOR` (未設定時
+    `vi`) を使い、invocation-wide の `--editor <command>` / `-e <command>` で一時上書きできる。
+    preview も自己呼び出し
     (`<self> __preview`) で TypeScript 描画: `bat` があれば syntax highlight を敷き (無ければ
     plain)、全 term の一致箇所を reverse video (SGR 7)
-    で強調して最初の一致行付近へ位置合わせる。反転は色状態に触れないため bat の配色と共存できる
+    で強調して最初の一致行付近へ位置合わせ、実ファイルの行番号を各行に表示する。反転は色状態に
+    触れないため bat の配色と共存できる
     (色での強調は ANSI と干渉するので不可)。preview pane は wrap がデフォルト (fzf の preview に横
     scroll は存在しないため、折り返さないと長行の続きを読む手段がない)。shift-up / shift-down で
     scroll、ctrl-/ で wrap の toggle (コードや表の桁揃えを見たいとき用)。ctrl-u は query
