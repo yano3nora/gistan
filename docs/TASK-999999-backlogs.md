@@ -29,14 +29,6 @@
       のみ」に変わった (旧: `hash  filename` の shasum 形式)。`mise use -g github:yano3nora/gistan`
       で新規インストールが通ることを確認する。archive 名と「バイナリのみ同梱」は旧規約と同一
 
-## 実装タスク (指示書あり)
-
-- [ ] **search のキーストローク反映レイテンシ改善 (Option A: rg 並列化 / Option B: dynamic import
-      化)** — [TASK-260712-search-latency](./TASK-260712-search-latency.md)。**未着手** (2026-07-12
-      時点で `search_render.ts` の rg は直列、`main.ts` は静的 import のまま)。 注意: 指示書の asis
-      実測は v0.5.0 相当のコードでの値。v0.7.0 で description のマッチ・index 読み込みが renderer
-      に加わったため、**着手時はまず同一手順で再計測**して 現状値を確定させてから A / B に入ること
-
 ## 判断待ち・トリガー待ち (実害や必要性が出たら着手)
 
 配布まわり:
@@ -68,6 +60,9 @@ SPEC-0001 Open Questions と同期している項目:
 
 - 2026-07-12 に [TASK-260712-wrap-up-and-next](./TASK-260712-wrap-up-and-next.md) のクローズに伴い、
   同 TASK の todo と各 TASK の未チェック項目をここへ棚卸しした
+- 2026-07-13 に search レイテンシ改善を
+  [TASK-260712-search-latency](./TASK-260712-search-latency.md) として実施。rg 並列化を採用し、dynamic
+  import は実測条件を満たさず不採用
 - 「filename 内 tab の完全なエスケープ機構」は won't-do として棚卸しから除外 (`new`
   での制御文字拒否 + renderer 側の tab 入り path 除外で実害を塞いだ。プロトコルは 複雑化しない —
   TASK-260712-gist-id-restructure codex レビュー見送り)

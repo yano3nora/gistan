@@ -112,6 +112,43 @@ Deno.test("render: !term excludes files containing it", async () => {
   assertEquals(stripAnsi(io.stdout), "gists/g1/one.md\t2\tone.md:2: only foo lives here\n");
 });
 
+Deno.test("render: !term also excludes a filename-only match", async () => {
+  const files = ["gists/g1/keep.md", "gists/g2/draft-notes.md"];
+  const { runner } = renderRunner({
+    files,
+    liByTerm: { foo: files },
+    hits: ["gists/g1/keep.md:1:foo", "gists/g2/draft-notes.md:1:foo"],
+  });
+  const io = memoryContext(runner, "/nonexistent");
+  assertEquals(await runSearchRender(["foo", "!draft"], io.context), 0);
+  assertEquals(stripAnsi(io.stdout), "gists/g1/keep.md\t1\tkeep.md:1: foo\n");
+});
+
+Deno.test("render: file enumeration and all per-term rg calls start concurrently", async () => {
+  let releaseFiles: (() => void) | undefined;
+  const filesBlocked = new Promise<void>((resolve) => releaseFiles = resolve);
+  const startedTerms: string[] = [];
+  const runner: Runner = async (_cmd, args) => {
+    if (args[0] === "--files") {
+      await filesBlocked;
+      return { code: 0, stdout: "gists/g1/one.md\n", stderr: "" };
+    }
+    if (args[0] === "-li") {
+      startedTerms.push(args[args.indexOf("--") + 1]);
+    }
+    return { code: 1, stdout: "", stderr: "" };
+  };
+  const io = memoryContext(runner, "/nonexistent");
+  const rendering = runSearchRender(["foo", "bar", "!draft"], io.context);
+
+  // Enumeration is deliberately unresolved: seeing every term here proves
+  // the independent subprocesses are not serialized behind it or each other.
+  await Promise.resolve();
+  assertEquals(new Set(startedTerms), new Set(["foo", "bar", "draft"]));
+  releaseFiles?.();
+  assertEquals(await rendering, 0);
+});
+
 Deno.test("render: a path-only hit joins the set and renders without a line field", async () => {
   // "three" matches no content, but three.md contains it in the filename.
   const { runner } = renderRunner({ files: FILES, liByTerm: {}, hits: [] });

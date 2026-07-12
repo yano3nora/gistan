@@ -53,8 +53,18 @@ export async function runSearchRender(
   const query = args.join(" ");
   const { positives, negatives } = parseTerms(query);
 
-  const files = await listFiles(context);
-  const descriptions = await loadDescriptionsSafe();
+  // Enumeration, metadata loading, and every independent content search start
+  // together. Only the cheap metadata merge below needs the complete file list.
+  const filesPromise = listFiles(context);
+  const descriptionsPromise = loadDescriptionsSafe();
+  const contentSetsPromise = positives.length === 0
+    ? Promise.resolve([] as Set<string>[])
+    : Promise.all([...positives, ...negatives].map((term) => rgFilesMatching(context, term)));
+  const [files, descriptions, contentSets] = await Promise.all([
+    filesPromise,
+    descriptionsPromise,
+    contentSetsPromise,
+  ]);
   const describe = (file: string) => descriptionFor(descriptions, file);
 
   // Zero positive terms (empty query, or only exclusions) = plain file list.
@@ -67,13 +77,14 @@ export async function runSearchRender(
   }
 
   // File-level AND across positive terms, minus every negative term's set.
-  let candidates = await termSet(context, positives[0], files, describe);
-  for (const term of positives.slice(1)) {
-    const set = await termSet(context, term, files, describe);
+  const termSets = [...positives, ...negatives].map((term, index) =>
+    mergeMetadataMatches(contentSets[index], term, files, describe)
+  );
+  let candidates = termSets[0];
+  for (const set of termSets.slice(1, positives.length)) {
     candidates = new Set([...candidates].filter((file) => set.has(file)));
   }
-  for (const term of negatives) {
-    const set = await termSet(context, term, files, describe);
+  for (const set of termSets.slice(positives.length)) {
     candidates = new Set([...candidates].filter((file) => !set.has(file)));
   }
 
@@ -138,17 +149,10 @@ async function listFiles(context: CommandContext): Promise<string[]> {
   return result.stdout.split("\n").filter((line) => line !== "" && !line.includes("\t"));
 }
 
-/**
- * Files matching one term: content matches (rg -li; -F literal, -i
- * case-insensitive) UNION files whose display path or description contains
- * the term — rg's content search never looks at filenames or the index, so
- * both metadata hits must be merged in explicitly.
- */
-async function termSet(
+/** Content matches for one term (rg -li; fixed-string, case-insensitive). */
+async function rgFilesMatching(
   context: CommandContext,
   term: string,
-  files: readonly string[],
-  describe: (file: string) => string,
 ): Promise<Set<string>> {
   const result = await context.runner("rg", [
     "-li",
@@ -159,7 +163,17 @@ async function termSet(
     "gists",
     "stars",
   ]);
-  const set = new Set(result.stdout.split("\n").filter((line) => line !== ""));
+  return new Set(result.stdout.split("\n").filter((line) => line !== ""));
+}
+
+/** Merge filename/description hits after enumeration and all rg calls finish. */
+function mergeMetadataMatches(
+  contentMatches: ReadonlySet<string>,
+  term: string,
+  files: readonly string[],
+  describe: (file: string) => string,
+): Set<string> {
+  const set = new Set(contentMatches);
   const needle = term.toLowerCase();
   for (const file of files) {
     if (

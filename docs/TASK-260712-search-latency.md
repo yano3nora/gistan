@@ -2,8 +2,8 @@
 
 # 260712 search latency
 
-> **Status: 未着手 (実装は後続 AI に委任)**。調査・設計・判断は 2026-07-12 に完了済み。 実装対象は
-> Option A と B のみ。C は保留 (notes 参照)、D は非採用の記録。
+> **Status: 完了 (2026-07-13)**。Option A を採用。Option B は同一条件で 15ms 以上の改善がなく
+> 指示どおり不採用。C は保留 (notes 参照)、D は非採用の記録。
 
 ## asis
 
@@ -53,53 +53,62 @@ perl -MTime::HiRes=time -e '
 
 対象: `src/commands/search_render.ts` の `runSearchRender`。
 
-- [ ] `termSet()` を「rg 部分」と「path ヒット合流部分」に分離する
+- [x] `termSet()` を「rg 部分」と「path ヒット合流部分」に分離する
   - 現在の `termSet(context, term, files)` は rg `-li` の結果 Set に「display path が term を含む
     file」を 合流させてから返す。rg 呼び出し (`rgFilesMatching(context, term)`) だけを切り出し、
     path 合流は rg 結果が出揃った後に純関数で行う
-- [ ] `listFiles` + 全 positive term の rg + 全 negative term の rg を `Promise.all` で並列 spawn
+- [x] `listFiles` + 全 positive term の rg + 全 negative term の rg を `Promise.all` で並列 spawn
       する
   - **negative term にも path 合流を適用すること** (現行セマンティクス: `!term` は path に term を
     含む file も除外する)。合流には `listFiles` の結果が必要なので、合流・積集合・差集合は all
     解決後の TS 処理
   - `firstHits` は候補集合に依存するため従来どおり後段 (直列) でよい
-- [ ] `search_test.ts` の render 系テストが rg 呼び出しの「順序」に依存していないか確認し、
+- [x] `search_test.ts` の render 系テストが rg 呼び出しの「順序」に依存していないか確認し、
       依存していれば「呼ばれた引数の集合」での検証に直す
-- [ ] 効果を実測して本 TASK に記録 (期待値: 1 term -20ms / 2 terms -40ms、段数が 「並列集合演算 →
+- [x] 効果を実測して本 TASK に記録 (期待値: 1 term -20ms / 2 terms -40ms、段数が 「並列集合演算 →
       firstHits」の 2 段に頭打ちになる)
 
 ### Option B: `main.ts` の dynamic import 化 (小さいトレードオフ、効果は要実測)
 
-- [ ] `COMMANDS` を静的 import の handler map から lazy loader map に変える:
+- [x] `COMMANDS` を静的 import の handler map から lazy loader map に変える:
       `search: () => import("./commands/search.ts").then((m) => m.run)` の形。 specifier
       は必ず文字列リテラル (deno compile が同梱できる条件)
-- [ ] 隠し renderer (`__search-render` / `__preview`) も同様に lazy 化する — ここが本命。
+- [x] 隠し renderer (`__search-render` / `__preview`) も同様に lazy 化する — ここが本命。
       `__search-render` の import graph は search_render.ts + types.ts だけになるはず
-- [ ] `RunOptions.commands` (テスト注入) は現行どおり handler 直渡しを受け、 override があれば lazy
+- [x] `RunOptions.commands` (テスト注入) は現行どおり handler 直渡しを受け、 override があれば lazy
       load せずそれを使う
-- [ ] `COMMAND_DESCRIPTIONS` / usage は静的な文字列のままにする (lazy 化しない)
-- [ ] **compile 済みバイナリで dynamic import が動くことを実機確認する** (`deno task compile` →
+- [x] `COMMAND_DESCRIPTIONS` / usage は静的な文字列のままにする (lazy 化しない)
+- [x] **compile 済みバイナリで dynamic import が動くことを実機確認する** (`deno task compile` →
       `./gistan __search-render foo` を実 repo cwd で実行)
-- [ ] 効果を実測し、**`__search-render` の median が 15ms 以上縮まなければ B は不採用として revert
+- [x] 効果を実測し、**`__search-render` の median が 15ms 以上縮まなければ B は不採用として revert
       し、実測値だけ本 TASK に記録する** (V8 初期化が支配的でモジュール評価の
       節約が効かない可能性がある)
 
 ### 共通の完了条件
 
-- [ ] `deno task check` / `deno task test` 全通過
-- [ ] 検索セマンティクスのテスト (AND / 除外 / tier / 抜粋 / 色) が変更なしで通る
-- [ ] before/after の実測値 (上記手順、同一マシン) を本 TASK の notes に追記
-- [ ] SPEC-0001 は変更不要のはず (挙動不変)。変わる場合は実装が間違っている
+- [x] `deno task check` / `deno task test` 全通過
+- [x] 検索セマンティクスのテスト (AND / 除外 / tier / 抜粋 / 色) が変更なしで通る
+- [x] before/after の実測値 (上記手順、同一マシン) を本 TASK の notes に追記
+- [x] SPEC-0001 は変更不要のはず (挙動不変)。変わる場合は実装が間違っている
 
 ## testcases
 
-- [ ] A: 2 positive + 1 negative のクエリで、結果の file 集合・行・抜粋が並列化前と完全一致する
-- [ ] A: negative term が「path にだけ term を含む file」を除外する (合流の回帰)
-- [ ] B: `gistan --version` / `--help` / 既知コマンド / search fallback / removed hint の dispatch
+- [x] A: 2 positive + 1 negative のクエリで、結果の file 集合・行・抜粋が並列化前と完全一致する
+- [x] A: negative term が「path にだけ term を含む file」を除外する (合流の回帰)
+- [x] B: `gistan --version` / `--help` / 既知コマンド / search fallback / removed hint の dispatch
       が全て従来どおり (main_test 一式)
-- [ ] B: compile 済みバイナリでの `__search-render` / `__preview` 実機動作 (人間 or 実行環境で確認)
+- [x] B: compile 済みバイナリでの `__search-render` / `__preview` 実機動作 (人間 or 実行環境で確認)
 
 ## notes
+
+- 2026-07-13 再計測・実装。実データ repo (1590 files / 8.7MB)、Intel Mac、compile 済みバイナリ、
+  各 20 回を before / after 交互実行した median: 1 term `170.3 → 153.1ms` (-17.2ms)、2 terms
+  `207.7 → 180.7ms` (-27.0ms)、2 terms + 除外 1 `186.8 → 148.8ms` (-38.0ms)。マシン負荷で
+  絶対値の振れが大きいため、差分は交互実行値を採用した。A は term 数に応じて効果が増え、採用。
+- B の候補実装は compile 済みバイナリで `__search-render` / `__preview` と main_test 25 件を確認。
+  A-only / A+B を各 20 回交互実行した median は 1 term `133.2 / 133.7ms`、2 terms
+  `144.1 / 144.0ms`、2 terms + 除外 1 `142.9 / 145.0ms`。15ms 改善条件を満たさないため revert。
+  dynamic import は埋め込みサイズを減らさず、今回の compile バイナリでは評価遅延の利得がなかった。
 
 - **Option C (常駐レンダラ) は保留**。search 起動中の gistan 親プロセスが FIFO 経由で描画し、 reload
   を `echo {q} > req; cat resp` にする案。プロセス起動が消え、コーパスの メモリキャッシュまでやれば
