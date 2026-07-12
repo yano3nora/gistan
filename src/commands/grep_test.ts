@@ -1,15 +1,20 @@
 import { assert, assertEquals } from "@std/assert";
 import { EXIT_COMMAND_NOT_FOUND, type Runner, type RunOptions } from "../core/proc.ts";
-import { saveState } from "../core/state.ts";
-import { exists } from "./shared.ts";
-import { AT, fixture, join, memoryContext } from "./test_helpers.ts";
-import { run } from "./grep.ts";
+import { FIELD_DELIMITER } from "./shared.ts";
+import { fixture, join, memoryContext } from "./test_helpers.ts";
+import { run, selfRenderCommand } from "./grep.ts";
 
 interface Call {
   cmd: string;
   args: readonly string[];
   options?: RunOptions;
 }
+
+// `gistan grep` is the line-level regex mode (TASK-260708 followup 2); the
+// list itself is now rendered by the hidden `__grep-render` subcommand
+// (grep_render.ts, covered by grep_render_test.ts) instead of an sh
+// pipeline. What's left here is the fzf session wiring shared with search
+// (runQueryUi, shared.ts) plus grep's own selfRenderCommand and preview tail.
 
 function grepRunner(fzf: { code: number; stdout: string }): { runner: Runner; calls: Call[] } {
   const calls: Call[] = [];
@@ -23,31 +28,131 @@ function grepRunner(fzf: { code: number; stdout: string }): { runner: Runner; ca
   return { runner, calls };
 }
 
-// `gistan grep` is the former line-level `gistan search` (TASK-260708
-// followup 2), so these are the old search tests under the new name.
-// Displayed paths have the `gists/` prefix stripped for readability, so a
-// real fzf selection line looks like "a/a.md:12:3:hit", not
-// "gists/a/a.md:12:3:hit". These mocks reflect that; toRelPath is what
-// restores the real repo-relative path before opening/printing it.
+function fzfCall(calls: readonly Call[]): Call | undefined {
+  return calls.find((call) => call.cmd === "fzf" && call.args.includes("--disabled"));
+}
 
-Deno.test("grep opens the picked snippet at its line in a vim-family editor", async () => {
+// -- selfRenderCommand: the fzf reload re-invokes gistan itself --------------
+
+Deno.test("selfRenderCommand spells out deno run + entrypoint + permissions in dev", () => {
+  const cmd = selfRenderCommand("/opt/deno/bin/deno", "file:///work/gistan/src/main.ts");
+  assertEquals(
+    cmd,
+    '"/opt/deno/bin/deno" run --allow-read --allow-run --allow-env ' +
+      '"/work/gistan/src/main.ts" __grep-render {q}',
+  );
+});
+
+Deno.test("selfRenderCommand calls the compiled binary directly", () => {
+  const cmd = selfRenderCommand("/usr/local/bin/gistan", "file:///usr/local/bin/gistan");
+  assertEquals(cmd, '"/usr/local/bin/gistan" __grep-render {q}');
+});
+
+// -- run(): fzf wiring --------------------------------------------------------
+
+Deno.test("grep runs fzf disabled+ansi with the grep-render reload bind", async () => {
   const { home } = await fixture();
-  const { runner, calls } = grepRunner({ code: 0, stdout: "a/a.md:12:3:hit\n" });
+  const { runner, calls } = grepRunner({ code: 130, stdout: "" });
   const io = memoryContext(runner, home, { editor: "vim" });
 
   assertEquals(await run({ name: "grep", args: ["react"] }, io.context), 0);
+  const fzf = fzfCall(calls);
+  assert(fzf !== undefined);
+  assert(fzf.args.includes("--disabled"));
+  assert(fzf.args.includes("--ansi"));
+  assert(fzf.args.includes("react")); // initial --query
+  const reloads = fzf.args.filter((arg) => arg.includes("reload:"));
+  assertEquals(reloads.length, 2); // start + change
+  for (const bind of reloads) {
+    assert(bind.includes("__grep-render {q}"));
+  }
+  assertEquals(fzf.args[fzf.args.indexOf("--delimiter") + 1], "\t");
+  assertEquals(fzf.args[fzf.args.indexOf("--with-nth") + 1], "3..");
+  assert(fzf.args.some((arg) => arg.startsWith("ctrl-o:execute-silent(")));
+  assert(fzf.args.some((arg) => arg.startsWith("ctrl-y:execute-silent(")));
+});
 
-  // Skip the deps probe (`fzf --version`) — the real invocation has --disabled.
-  const fzf = calls.find((call) => call.cmd === "fzf" && call.args.includes("--disabled"));
-  assertEquals(fzf?.args.includes("react"), true); // initial --query
+Deno.test("shift-up / shift-down scroll the preview; ctrl-u clears the query; the pane wraps", async () => {
+  const { home } = await fixture();
+  const { runner, calls } = grepRunner({ code: 130, stdout: "" });
+  const io = memoryContext(runner, home, { editor: "vim" });
+
+  assertEquals(await run({ name: "grep", args: [] }, io.context), 0);
+  const fzf = fzfCall(calls);
+  assert(
+    fzf?.args.includes(
+      "shift-up:preview-half-page-up,shift-down:preview-half-page-down,ctrl-u:clear-query," +
+        "ctrl-/:toggle-preview-wrap",
+    ),
+  );
+  assertEquals(fzf?.args[fzf.args.indexOf("--preview-window") + 1], "wrap");
+  assertEquals(fzf?.args[fzf.args.indexOf("--layout") + 1], "reverse");
+});
+
+function previewArg(calls: readonly Call[]): string {
+  const fzf = fzfCall(calls);
+  if (fzf === undefined) return "";
+  return String(fzf.args[fzf.args.indexOf("--preview") + 1] ?? "");
+}
+
+Deno.test("the preview self-invokes __preview grep, passing {2} as the line anchor", async () => {
+  const { home } = await fixture();
+  const { runner, calls } = grepRunner({ code: 130, stdout: "" });
+  const io = memoryContext(runner, home, { editor: "vim" });
+  assertEquals(await run({ name: "grep", args: [] }, io.context), 0);
+  assert(previewArg(calls).includes("__preview grep bat {q} {1} {2}"));
+
+  const { home: home2 } = await fixture();
+  const calls2: Call[] = [];
+  const runner2: Runner = (cmd, args, options) => {
+    calls2.push({ cmd, args, options });
+    if (cmd === "bat") {
+      return Promise.resolve({ code: EXIT_COMMAND_NOT_FOUND, stdout: "", stderr: "" });
+    }
+    if (cmd === "fzf" && args.includes("--disabled")) {
+      return Promise.resolve({ code: 130, stdout: "", stderr: "" });
+    }
+    return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+  };
+  const io2 = memoryContext(runner2, home2, { editor: "vim" });
+  assertEquals(await run({ name: "grep", args: [] }, io2.context), 0);
+  assert(previewArg(calls2).includes("__preview grep nobat {q} {1} {2}"));
+});
+
+Deno.test("ctrl-v hands the selection to config.viewer; unset viewer installs no bind", async () => {
+  const { home } = await fixture({ viewer: "leaf" });
+  const { runner, calls } = grepRunner({ code: 130, stdout: "" });
+  const io = memoryContext(runner, home, { editor: "vim" });
+  assertEquals(await run({ name: "grep", args: [] }, io.context), 0);
+  const bind = fzfCall(calls)?.args.find((arg) => arg.startsWith("ctrl-v:execute("));
+  assert(bind !== undefined);
+  assertEquals(bind, "ctrl-v:execute(test -f {1} && leaf {1})");
+
+  const { home: home2 } = await fixture();
+  const { runner: runner2, calls: calls2 } = grepRunner({ code: 130, stdout: "" });
+  const io2 = memoryContext(runner2, home2, { editor: "vim" });
+  assertEquals(await run({ name: "grep", args: [] }, io2.context), 0);
+  assertEquals(fzfCall(calls2)?.args.some((arg) => arg.startsWith("ctrl-v:")), false);
+});
+
+// -- selection handling ---------------------------------------------------
+
+Deno.test("a picked row opens the editor at its line field", async () => {
+  const { home } = await fixture();
+  const row = `gists/a/a.md${FIELD_DELIMITER}12${FIELD_DELIMITER}a.md:12:3:hit`;
+  const { runner, calls } = grepRunner({ code: 0, stdout: `${row}\n` });
+  const io = memoryContext(runner, home, { editor: "vim" });
+
+  assertEquals(await run({ name: "grep", args: ["react"] }, io.context), 0);
   const editor = calls.find((call) => call.cmd === "vim");
   assertEquals(editor?.args, ["+12", "gists/a/a.md"]);
   assertEquals(editor?.options?.interactive, true);
 });
 
-Deno.test("a file-list pick (no line part) opens without a line jump", async () => {
+Deno.test("a path-only pick (empty line field) opens without a line jump", async () => {
   const { home } = await fixture();
-  const { runner, calls } = grepRunner({ code: 0, stdout: "a/a.md\n" });
+  const row = `gists/a/a.md${FIELD_DELIMITER}${FIELD_DELIMITER}a.md`;
+  const { runner, calls } = grepRunner({ code: 0, stdout: `${row}\n` });
   const io = memoryContext(runner, home, { editor: "vim" });
 
   assertEquals(await run({ name: "grep", args: [] }, io.context), 0);
@@ -55,21 +160,10 @@ Deno.test("a file-list pick (no line part) opens without a line jump", async () 
   assertEquals(editor?.args, ["gists/a/a.md"]);
 });
 
-Deno.test("a filename/dirname hit (query matched the path, not the content) opens with no line jump", async () => {
-  const { home } = await fixture();
-  // Filename hits are concatenated ahead of content-grep hits and carry no
-  // `:line:` suffix — same shape as a plain file-list pick.
-  const { runner, calls } = grepRunner({ code: 0, stdout: "hello-notes/readme.md\n" });
-  const io = memoryContext(runner, home, { editor: "vim" });
-
-  assertEquals(await run({ name: "grep", args: ["hello"] }, io.context), 0);
-  const editor = calls.find((call) => call.cmd === "vim");
-  assertEquals(editor?.args, ["gists/hello-notes/readme.md"]);
-});
-
 Deno.test("grep opens stars matches read-only", async () => {
   const { home } = await fixture();
-  const { runner, calls } = grepRunner({ code: 0, stdout: "stars/octo/g1/note.md:1:1:x\n" });
+  const row = `stars/octo/g1/note.md${FIELD_DELIMITER}1${FIELD_DELIMITER}stars/octo/note.md:1:1:x`;
+  const { runner, calls } = grepRunner({ code: 0, stdout: `${row}\n` });
   const io = memoryContext(runner, home, { editor: "vim" });
 
   assertEquals(await run({ name: "grep", args: [] }, io.context), 0);
@@ -79,7 +173,8 @@ Deno.test("grep opens stars matches read-only", async () => {
 
 Deno.test("grep passes only the file to a non-vim editor", async () => {
   const { home } = await fixture();
-  const { runner, calls } = grepRunner({ code: 0, stdout: "a/a.md:12:3:hit\n" });
+  const row = `gists/a/a.md${FIELD_DELIMITER}12${FIELD_DELIMITER}a.md:12:3:hit`;
+  const { runner, calls } = grepRunner({ code: 0, stdout: `${row}\n` });
   const io = memoryContext(runner, home, { editor: "code" });
 
   assertEquals(await run({ name: "grep", args: [] }, io.context), 0);
@@ -119,11 +214,23 @@ Deno.test("grep requires init to have run", async () => {
   assert(io.stderr.includes("gistan root init"));
 });
 
+Deno.test("fzf no-match (1) and abort (130) are normal exits that open nothing", async () => {
+  for (const code of [1, 130]) {
+    const { home } = await fixture();
+    const { runner, calls } = grepRunner({ code, stdout: "" });
+    const io = memoryContext(runner, home, { editor: "vim" });
+
+    assertEquals(await run({ name: "grep", args: [] }, io.context), 0);
+    assertEquals(calls.some((call) => call.cmd === "vim"), false);
+  }
+});
+
 // -- --path / -p: print the resolved path instead of opening an editor -----
 
 Deno.test("grep --path prints the resolved absolute path and opens no editor", async () => {
   const { home, repo } = await fixture();
-  const { runner, calls } = grepRunner({ code: 0, stdout: "a/a.md:12:3:hit\n" });
+  const row = `gists/a/a.md${FIELD_DELIMITER}12${FIELD_DELIMITER}a.md:12:3:hit`;
+  const { runner, calls } = grepRunner({ code: 0, stdout: `${row}\n` });
   const io = memoryContext(runner, home, { editor: "vim" });
 
   assertEquals(await run({ name: "grep", args: ["--path"] }, io.context), 0);
@@ -133,7 +240,8 @@ Deno.test("grep --path prints the resolved absolute path and opens no editor", a
 
 Deno.test("grep -p is an alias for --path", async () => {
   const { home, repo } = await fixture();
-  const { runner } = grepRunner({ code: 0, stdout: "a/a.md:12:3:hit\n" });
+  const row = `gists/a/a.md${FIELD_DELIMITER}12${FIELD_DELIMITER}a.md:12:3:hit`;
+  const { runner } = grepRunner({ code: 0, stdout: `${row}\n` });
   const io = memoryContext(runner, home, { editor: "vim" });
 
   assertEquals(await run({ name: "grep", args: ["-p"] }, io.context), 0);
@@ -142,185 +250,10 @@ Deno.test("grep -p is an alias for --path", async () => {
 
 Deno.test("grep --path on a stars/ pick keeps the stars/ prefix as-is", async () => {
   const { home, repo } = await fixture();
-  const { runner } = grepRunner({ code: 0, stdout: "stars/octo/g1/note.md:1:1:x\n" });
+  const row = `stars/octo/g1/note.md${FIELD_DELIMITER}1${FIELD_DELIMITER}stars/octo/note.md:1:1:x`;
+  const { runner } = grepRunner({ code: 0, stdout: `${row}\n` });
   const io = memoryContext(runner, home, { editor: "vim" });
 
   assertEquals(await run({ name: "grep", args: ["-p"] }, io.context), 0);
   assertEquals(io.stdout, `${join(repo, "stars", "octo", "g1", "note.md")}\n`);
-});
-
-// -- reload / preview command shape (fzf args) -------------------------------
-
-Deno.test("the reload command strips the gists/ prefix and concatenates filename hits before content hits", async () => {
-  const { home } = await fixture();
-  const { runner, calls } = grepRunner({ code: 0, stdout: "" });
-  const io = memoryContext(runner, home, { editor: "vim" });
-
-  assertEquals(await run({ name: "grep", args: [] }, io.context), 0);
-  const fzf = calls.find((call) => call.cmd === "fzf" && call.args.includes("--disabled"));
-  const bindIndex = fzf?.args.indexOf("--bind") ?? -1;
-  const reload = fzf?.args[bindIndex + 1] ?? "";
-  assert(reload.includes("sed 's|^gists/||'"));
-  // Filename/dirname hits (rg --files piped through rg -i) come before the
-  // content grep, so they are concatenated ahead of content hits.
-  assert(reload.indexOf("rg --files") < reload.indexOf("--column --line-number"));
-  assert(reload.includes("|| true"));
-});
-
-Deno.test("both reload branches sort by path so directories cluster", async () => {
-  const { home } = await fixture();
-  const { runner, calls } = grepRunner({ code: 0, stdout: "" });
-  const io = memoryContext(runner, home, { editor: "vim" });
-
-  assertEquals(await run({ name: "grep", args: [] }, io.context), 0);
-  const fzf = calls.find((call) => call.cmd === "fzf" && call.args.includes("--disabled"));
-  const bindIndex = fzf?.args.indexOf("--bind") ?? -1;
-  const reload = fzf?.args[bindIndex + 1] ?? "";
-  // Query branch: sort on the uncolored stream, BEFORE the final highlight
-  // pass (ANSI codes would break the sort keys). Key 2 is numeric so a
-  // filename hit (empty line field = 0) precedes its own content hits.
-  const sortIndex = reload.indexOf("sort -t: -k1,1 -k2,2n");
-  assert(sortIndex > 0);
-  assert(sortIndex < reload.indexOf("rg -i --color=always"));
-  // Empty-query branch: plain sort after the prefix strip.
-  assert(reload.includes("sed 's|^gists/||' | sort; fi"));
-});
-
-Deno.test("shift-up / shift-down scroll the preview; ctrl-u clears the query; the pane wraps", async () => {
-  const { home } = await fixture();
-  const { runner, calls } = grepRunner({ code: 0, stdout: "" });
-  const io = memoryContext(runner, home, { editor: "vim" });
-
-  assertEquals(await run({ name: "grep", args: [] }, io.context), 0);
-  const fzf = calls.find((call) => call.cmd === "fzf" && call.args.includes("--disabled"));
-  assert(
-    fzf?.args.includes(
-      "shift-up:preview-half-page-up,shift-down:preview-half-page-down,ctrl-u:clear-query," +
-        "ctrl-/:toggle-preview-wrap",
-    ),
-  );
-  // Long prose must wrap: fzf previews cannot scroll horizontally.
-  assertEquals(fzf?.args[fzf.args.indexOf("--preview-window") + 1], "wrap");
-  // Path-sorted rows read A->Z from the top; never inherit a bottom-up layout.
-  assertEquals(fzf?.args[fzf.args.indexOf("--layout") + 1], "reverse");
-});
-
-Deno.test("the preview self-invokes __preview grep with the row's path and line", async () => {
-  const { home } = await fixture();
-  const { runner, calls } = grepRunner({ code: 0, stdout: "" });
-  const io = memoryContext(runner, home, { editor: "vim" });
-
-  assertEquals(await run({ name: "grep", args: [] }, io.context), 0);
-  const fzf = calls.find((call) => call.cmd === "fzf" && call.args.includes("--disabled"));
-  const previewIndex = fzf?.args.indexOf("--preview") ?? -1;
-  const preview = fzf?.args[previewIndex + 1] ?? "";
-  // bat token comes from the probe (the default mock runner answers exit 0).
-  assert(preview.includes("__preview grep bat {q} {1} {2}"));
-});
-
-Deno.test("ctrl-v hands the selection to config.viewer; unset viewer installs no bind", async () => {
-  const { home } = await fixture({ viewer: "leaf" });
-  const { runner, calls } = grepRunner({ code: 130, stdout: "" });
-  const io = memoryContext(runner, home, { editor: "vim" });
-  assertEquals(await run({ name: "grep", args: [] }, io.context), 0);
-  const fzf = calls.find((call) => call.cmd === "fzf" && call.args.includes("--disabled"));
-  const bind = fzf?.args.find((arg) => arg.startsWith("ctrl-v:execute("));
-  assert(bind !== undefined);
-  assert(bind.includes('leaf "$f"'));
-
-  const { home: home2 } = await fixture();
-  const { runner: runner2, calls: calls2 } = grepRunner({ code: 130, stdout: "" });
-  const io2 = memoryContext(runner2, home2, { editor: "vim" });
-  assertEquals(await run({ name: "grep", args: [] }, io2.context), 0);
-  const fzf2 = calls2.find((call) => call.cmd === "fzf" && call.args.includes("--disabled"));
-  assertEquals(fzf2?.args.some((arg) => arg.startsWith("ctrl-v:")), false);
-});
-
-// -- ctrl-o: open the selected item's gist in the browser --------------------
-
-function ctrlOBind(calls: readonly Call[]): string | undefined {
-  const fzf = calls.find((call) => call.cmd === "fzf" && call.args.includes("--disabled"));
-  return fzf?.args.find((arg) => arg.startsWith("ctrl-o:execute-silent("));
-}
-
-/** The dirname->id map file path is embedded in the bind, right after the awk program. */
-function mapFileFromBind(bind: string): string | undefined {
-  return bind.match(/\{print \$2\}' "([^"]+)"/)?.[1];
-}
-
-Deno.test("ctrl-o is bound to a silent gist-URL opener fed by the dirname->id map file", async () => {
-  const { home } = await fixture();
-  const { runner, calls } = grepRunner({ code: 0, stdout: "" });
-  const io = memoryContext(runner, home, { editor: "vim" });
-
-  assertEquals(await run({ name: "grep", args: [] }, io.context), 0);
-  const bind = ctrlOBind(calls);
-  assert(bind !== undefined);
-  const mapFile = mapFileFromBind(bind);
-  assert(mapFile !== undefined && mapFile !== "");
-  // Same URL shape as gistUrl(), opener picked per OS; stars/ paths derive the
-  // id from their own 3rd path segment instead of the awk map (TASK-260706).
-  const opener = Deno.build.os === "darwin" ? "open" : "xdg-open";
-  assert(bind.includes(`${opener} "https://gist.github.com/$id"`));
-  assert(bind.includes('if test "$d" = stars'));
-  assert(bind.includes("id=${rest%%/*}"));
-  assert(bind.includes("awk -F'\\t'"));
-});
-
-Deno.test("the map file holds one dirname\\tid line per index entry and is removed after fzf exits", async () => {
-  const { home, repo } = await fixture();
-  await saveState(repo, {
-    version: 2,
-    gists: {
-      alpha: {
-        id: "id-alpha",
-        visibility: "public",
-        remote_updated_at: AT,
-        synced_description_hash: null,
-        files: {},
-      },
-      beta: {
-        id: "id-beta",
-        visibility: "secret",
-        remote_updated_at: AT,
-        synced_description_hash: null,
-        files: {},
-      },
-    },
-  });
-  // Capture the map file's contents while fzf is "running" — run() deletes
-  // it right after the runner call returns.
-  let mapFile: string | undefined;
-  let contents: string | undefined;
-  const runner: Runner = (cmd, args) => {
-    if (cmd === "fzf" && args.includes("--disabled")) {
-      mapFile = mapFileFromBind(args.find((a) => a.startsWith("ctrl-o:")) ?? "");
-      if (mapFile !== undefined) contents = Deno.readTextFileSync(mapFile);
-      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
-    }
-    return Promise.resolve({ code: 0, stdout: "", stderr: "" });
-  };
-  const io = memoryContext(runner, home, { editor: "vim" });
-
-  assertEquals(await run({ name: "grep", args: [] }, io.context), 0);
-  assertEquals(contents, "alpha\tid-alpha\nbeta\tid-beta\n");
-  assert(mapFile !== undefined);
-  assertEquals(await exists(mapFile), false);
-});
-
-Deno.test("the map file is removed even when fzf fails", async () => {
-  const { home } = await fixture();
-  let mapFile: string | undefined;
-  const runner: Runner = (cmd, args) => {
-    if (cmd === "fzf" && args.includes("--disabled")) {
-      mapFile = mapFileFromBind(args.find((a) => a.startsWith("ctrl-o:")) ?? "");
-      return Promise.resolve({ code: 2, stdout: "", stderr: "boom" });
-    }
-    return Promise.resolve({ code: 0, stdout: "", stderr: "" });
-  };
-  const io = memoryContext(runner, home, { editor: "vim" });
-
-  assertEquals(await run({ name: "grep", args: [] }, io.context), 1);
-  assert(mapFile !== undefined);
-  assertEquals(await exists(mapFile), false);
 });

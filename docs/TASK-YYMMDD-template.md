@@ -1,7 +1,6 @@
 # TASK-YYMMDD: TODO
 
-YYMMDD title
-===
+# YYMMDD title
 
 ## asis
 

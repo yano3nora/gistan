@@ -1,10 +1,13 @@
+import { runCopyAction, runListRender, runOpenAction } from "./commands/actions.ts";
 import { run as runEdit } from "./commands/edit.ts";
 import { run as runGrep } from "./commands/grep.ts";
+import { runGrepRender } from "./commands/grep_render.ts";
 import { run as runImport } from "./commands/import.ts";
 import { run as runList } from "./commands/list.ts";
 import { run as runNew } from "./commands/new.ts";
 import { run as runPublish } from "./commands/publish.ts";
 import { run as runPull } from "./commands/pull.ts";
+import { run as runPush } from "./commands/push.ts";
 import { run as runRm } from "./commands/rm.ts";
 import { run as runRoot } from "./commands/root.ts";
 import { runPreviewRender } from "./commands/preview_render.ts";
@@ -17,19 +20,20 @@ import type { CommandContext, CommandHandler, CommandName } from "./commands/typ
 import { writeText } from "./commands/types.ts";
 import { defaultConfigPath } from "./core/config.ts";
 import { systemRunner } from "./core/proc.ts";
-export const VERSION = "gistan 0.6.0";
+export const VERSION = "gistan 0.7.0";
 export const COMMAND_DESCRIPTIONS: Record<CommandName, string> = {
-  new: "Create a file under gists/<dir>/.",
+  new: "Create a file in a new gist dir (--id adds to an existing one).",
   search: "Document-unit search across gists and stars.",
   grep: "Line-level regex grep across gists and stars.",
   edit: "Open a gist file.",
-  list: "List gist directories.",
+  list: "List gist files.",
   rm: "Delete a gist file.",
-  publish: "Publish/update a gist directory.",
-  unpublish: "Delete remote gist, keep local dir.",
-  pull: "Pull remote gist files.",
-  status: "Show drift status; --fix repairs.",
-  import: "Import existing gists.",
+  publish: "Create/update a gist by id or URL.",
+  unpublish: "Delete the remote gist by id or URL, keep local files.",
+  push: "Push every locally drifted gist (one confirm). Repo git push = `root push`.",
+  pull: "Pull every remotely drifted gist (one confirm). Repo git pull = `root pull`.",
+  status: "Show drift status; --fix repairs and resolves conflicts.",
+  import: "Import existing gists into gists/<gist-id>/.",
   root: "Manage the gist repo: init / path / commit / push / pull / status.",
   star: "Manage the star mirror: sync / add <url>.",
 };
@@ -42,6 +46,7 @@ const COMMANDS: Record<CommandName, CommandHandler> = {
   rm: runRm,
   publish: runPublish,
   unpublish: runUnpublish,
+  push: runPush,
   pull: runPull,
   status: runStatus,
   import: runImport,
@@ -131,15 +136,27 @@ async function dispatch(
     await writeText(context.stderr, REMOVED_COMMAND_HINTS[first]);
     return 2;
   }
-  // Hidden renderers behind `gistan search` / `gistan grep` (fzf's reload
-  // and preview binds call them on every keystroke); deliberately absent
-  // from COMMAND_DESCRIPTIONS/usage and dispatched before the search
-  // fallback would swallow them.
+  // Hidden renderers/actions behind search / grep / pickFile (fzf's reload,
+  // preview and key binds call them); deliberately absent from
+  // COMMAND_DESCRIPTIONS/usage and dispatched before the search fallback
+  // would swallow them.
   if (first === "__search-render") {
     return await runSearchRender(rest, context);
   }
+  if (first === "__grep-render") {
+    return await runGrepRender(rest, context);
+  }
   if (first === "__preview") {
     return await runPreviewRender(rest, context);
+  }
+  if (first === "__list") {
+    return await runListRender(context);
+  }
+  if (first === "__open") {
+    return await runOpenAction(rest, context);
+  }
+  if (first === "__copy") {
+    return await runCopyAction(rest, context);
   }
   const commandName = resolveCommand(first);
   if (commandName !== undefined) {

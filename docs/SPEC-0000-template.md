@@ -15,9 +15,9 @@ TODO: この仕様が何を定義するものか。
 ## Terms
 
 - `TODO`
-    - TODO: 用語定義
+  - TODO: 用語定義
 - `TODO`
-    - TODO
+  - TODO
 
 ## Behavior
 

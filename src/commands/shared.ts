@@ -3,9 +3,7 @@ import { basename, fromFileUrl, resolve } from "@std/path";
 import type { Config } from "../core/config.ts";
 import { loadConfig } from "../core/config.ts";
 import { checkDeps, DEPS } from "../core/deps.ts";
-import { gistUrl } from "../core/gh.ts";
 import type { Runner } from "../core/proc.ts";
-import { loadState } from "../core/state.ts";
 import type { CommandArgs, CommandContext } from "./types.ts";
 import { writeText } from "./types.ts";
 
@@ -16,11 +14,6 @@ export async function requireConfig(context: CommandContext): Promise<Config | u
     await writeText(context.stderr, "error: gistan is not initialized — run `gistan root init`\n");
   }
   return config;
-}
-
-/** CLI args accept bare filenames; the index always keys on repo-relative paths. */
-export function toRelPath(arg: string): string {
-  return arg.startsWith("gists/") || arg.startsWith("stars/") ? arg : `gists/${arg}`;
 }
 
 export async function exists(path: string): Promise<boolean> {
@@ -40,26 +33,34 @@ export const FZF_NO_MATCH = 1;
 export const FZF_ABORTED = 130;
 
 /**
- * The full file listing search/grep/pickFile browse. stars/ is gitignored
- * (a cache), so --no-ignore insures it is never dropped from results,
- * whatever a given rg version's ignore semantics for explicit path
- * arguments are.
+ * The row protocol every fzf list in gistan speaks (ADR-0003): renderers emit
+ * `real_path \t line \t display...` and fzf gets `--delimiter TAB
+ * --with-nth 3..`, so the user sees only the id-less display fields while
+ * every bind and the final selection still carry the real repo path in {1}
+ * (and the anchor line, possibly empty, in {2}). This is what lets display
+ * paths drop gist ids without any display->path reverse lookup.
  */
-export const LIST_CMD = "rg --files --no-ignore gists stars";
+export const FIELD_DELIMITER = "\t";
+export const DISPLAY_FIELDS = "3..";
 
-/** Fuzzy file pick; path === undefined means the user left without choosing. */
+/** Fuzzy file pick (edit / rm); path === undefined means the user left without choosing. */
 export async function pickFile(
   context: CommandContext,
   repo: string,
   query: string,
 ): Promise<{ path?: string; failed: boolean }> {
+  const listCmd = selfCommand(Deno.execPath(), Deno.mainModule, "__list");
   const picked = await context.runner("fzf", [
     "--query",
     query,
+    "--delimiter",
+    FIELD_DELIMITER,
+    "--with-nth",
+    DISPLAY_FIELDS,
     "--bind",
-    `start:reload:${LIST_CMD}`,
+    `start:reload:${listCmd}`,
     "--preview",
-    "head -40 {}",
+    "head -40 {1}",
   ], { cwd: repo });
   if (picked.code === FZF_NO_MATCH || picked.code === FZF_ABORTED) {
     return { failed: false };
@@ -71,7 +72,7 @@ export async function pickFile(
     );
     return { failed: true };
   }
-  const path = picked.stdout.split("\n").at(0)?.trim();
+  const path = picked.stdout.split("\n").at(0)?.split(FIELD_DELIMITER).at(0)?.trim();
   return { path: path === "" ? undefined : path, failed: false };
 }
 
@@ -97,39 +98,27 @@ export const PREVIEW_WINDOW = "wrap";
 
 /**
  * The result list is path-sorted, not relevance-ranked (fzf runs --disabled;
- * the renderers emit display-path order so directories cluster). fzf's
+ * the renderers emit display-path order so gists cluster). fzf's
  * stock bottom-up layout would show that list Z→A from the top of the
  * screen, so pin top-down explicitly — first row and cursor at the top —
  * instead of leaving it to whatever FZF_DEFAULT_OPTS happens to say.
  */
 export const LAYOUT = "reverse";
 
-const OPENER = Deno.build.os === "darwin" ? "open" : "xdg-open";
-
 /**
- * ctrl-o opens the selected item's gist in the browser without leaving fzf
- * (search and grep share this bind). {1} is the gists/-stripped, stars/-kept
- * display path with either delimiter (`:` in grep, tab in search): the first
- * segment up to `/` is the dirname for a gists/ path, or the literal `stars`
- * for a mirror path. Two id sources depending on which:
- *   - gists/<dirname>/...: dirname -> gist id comes from a temp file (one
- *     "dirname\tid" line per index entry, see writeGistMapFile), looked up
- *     via awk — no JSON parsing in shell.
- *   - stars/<owner>/<gist-id>/...: the id is already the 3rd path segment
- *     (v3 mirror layout, TASK-260706), peeled off with `${var#prefix}` /
- *     `${var%%/*}` — no lookup file needed.
- * Unpublished gists/ dirs (absent from the map) are the only remaining
- * no-op. The body deliberately contains no parentheses or brackets
- * (backticks instead of `$()`, `test` instead of `[`, `if/then/else/fi`
- * instead of subshells): fzf's execute-silent(...) arg parsing chokes on
- * unbalanced delimiters inside the body.
+ * ctrl-o opens the selected item's gist in the browser, ctrl-y copies its
+ * URL (published / star) or local id (unpublished) — the handoff into
+ * `publish <id>` etc. (ADR-0003). Both re-invoke gistan ({1} = the hidden
+ * real-path field) so the published-or-not decision lives in TypeScript,
+ * not in an awk-over-tempfile lookup like the pre-v3 bind. ctrl-y, not
+ * ctrl-c: fzf reserves ctrl-c for abort.
  */
-export function browseBind(mapFile: string): string {
-  const lookup = `awk -F'\\t' -v d="$d" '$1==d {print $2}' "${mapFile}"`;
-  return "ctrl-o:execute-silent(p={1}; d=${p%%/*}; " +
-    'if test "$d" = stars; then rest=${p#stars/}; rest=${rest#*/}; id=${rest%%/*}; ' +
-    `else id=\`${lookup}\`; fi; ` +
-    `test -n "$id" && ${OPENER} "${gistUrl("$id")}" || true)`;
+export function openBind(selfOpenCmd: string): string {
+  return `ctrl-o:execute-silent(${selfOpenCmd})`;
+}
+
+export function copyBind(selfCopyCmd: string): string {
+  return `ctrl-y:execute-silent(${selfCopyCmd})`;
 }
 
 /**
@@ -138,16 +127,15 @@ export function browseBind(mapFile: string): string {
  * fzf: execute() suspends fzf, the viewer takes the terminal, and quitting
  * it drops back into the result list — a browse/read loop. ctrl-v is unbound
  * in stock fzf and free of muscle-memory collisions (ctrl-t is the fzf
- * shell file-widget, ctrl-o is our browser bind). {1} is resolved the
- * same way the previews do it (display paths may lack the gists/ prefix);
- * an empty {1} or a vanished file is a silent no-op. Same delimiter
- * constraint as browseBind (`test`, no `[`/`$()`): fzf's execute(...) arg
- * parsing chokes on unbalanced parens/brackets — which also means a viewer
- * command containing them would break the bind; not guarded, just avoid it.
+ * shell file-widget, ctrl-o/ctrl-y are our binds). {1} is the hidden
+ * real-path field; an empty {1} or a vanished file is a silent no-op. The
+ * body deliberately contains no parentheses or brackets (`test` instead of
+ * `[`): fzf's execute(...) arg parsing chokes on unbalanced delimiters —
+ * which also means a viewer command containing them would break the bind;
+ * not guarded, just avoid it.
  */
 export function viewerBind(viewer: string): string {
-  return `ctrl-v:execute(f={1}; test -f "$f" || f="gists/$f"; ` +
-    `test -f "$f" && ${viewer} "$f")`;
+  return `ctrl-v:execute(test -f {1} && ${viewer} {1})`;
 }
 
 /** Whether bat is installed — picks the `bat|nobat` token in __preview commands. */
@@ -158,10 +146,11 @@ export async function detectBat(runner: Runner): Promise<boolean> {
 
 /**
  * A command string that re-invokes this gistan with `tail` appended — for
- * fzf binds that call back into the CLI (`__search-render`, `__preview`).
- * Under `deno run` (dev) execPath is the deno binary, so the entrypoint
- * module and the permissions the renderers need must be spelled out; a
- * compiled binary just calls itself. Paths are quoted for fzf's $SHELL -c.
+ * fzf binds that call back into the CLI (`__search-render`, `__preview`,
+ * `__open`, `__copy`, `__list`). Under `deno run` (dev) execPath is the deno
+ * binary, so the entrypoint module and the permissions the renderers need
+ * must be spelled out; a compiled binary just calls itself. Paths are quoted
+ * for fzf's $SHELL -c.
  */
 export function selfCommand(execPath: string, mainModule: string, tail: string): string {
   if (basename(execPath) === "deno") {
@@ -169,26 +158,6 @@ export function selfCommand(execPath: string, mainModule: string, tail: string):
       `"${fromFileUrl(mainModule)}" ${tail}`;
   }
   return `"${execPath}" ${tail}`;
-}
-
-/**
- * Writes the dirname -> gist id map consumed by browseBind's awk lookup.
- * Callers must remove the returned temp file once fzf exits (a write failure
- * cleans up here so they never see a half-created file).
- */
-export async function writeGistMapFile(repo: string): Promise<string> {
-  const state = await loadState(repo);
-  const mapFile = await Deno.makeTempFile({ prefix: "gistan-search-", suffix: ".tsv" });
-  try {
-    await Deno.writeTextFile(
-      mapFile,
-      Object.entries(state.gists).map(([dirname, entry]) => `${dirname}\t${entry.id}\n`).join(""),
-    );
-  } catch (error) {
-    await Deno.remove(mapFile).catch(() => {});
-    throw error;
-  }
-  return mapFile;
 }
 
 /**
@@ -218,14 +187,14 @@ export async function openEditor(
 
 /**
  * The interactive query session `search` and `grep` share end-to-end:
- * config + rg/fzf presence checks, the dirname->gist-id map file lifecycle,
- * the fzf invocation (--disabled: the reload command is the matcher, fzf
- * only displays), and the selection handling (`--path`/-p prints the
- * absolute path, anything else opens the editor at the row's line). The
- * commands differ only in the reload command that renders the list — and,
- * derived from command.name, the __preview argv (grep passes the selected
- * row's own line {2} as the preview anchor; search rows have no such field,
- * so its preview finds the first match itself).
+ * config + rg/fzf presence checks, the fzf invocation (--disabled: the
+ * reload command is the matcher, fzf only displays; the 3-field row
+ * protocol hides ids, see FIELD_DELIMITER), and the selection handling
+ * (`--path`/-p prints the absolute path, anything else opens the editor at
+ * the row's line). The commands differ only in the reload command that
+ * renders the list — and, derived from command.name, the __preview argv
+ * (grep passes the selected row's line field {2} as the preview anchor;
+ * search leaves it out, so its preview finds the first match itself).
  */
 export async function runQueryUi(
   command: CommandArgs,
@@ -254,41 +223,35 @@ export async function runQueryUi(
   const query = flags._.map(String).join(" ");
   const bat = (await detectBat(context.runner)) ? "bat" : "nobat";
   const previewTail = command.name === "grep" ? "{q} {1} {2}" : "{q} {1}";
-  const previewCmd = selfCommand(
-    Deno.execPath(),
-    Deno.mainModule,
-    `__preview ${command.name} ${bat} ${previewTail}`,
-  );
-  const mapFile = await writeGistMapFile(config.repo);
-  let picked;
-  try {
-    picked = await context.runner("fzf", [
-      "--ansi",
-      "--disabled",
-      "--layout",
-      LAYOUT,
-      "--query",
-      query,
-      "--delimiter",
-      ":",
-      "--bind",
-      `start:reload:${reloadCmd}`,
-      "--bind",
-      `change:reload:${reloadCmd}`,
-      "--bind",
-      PREVIEW_SCROLL_BIND,
-      "--bind",
-      browseBind(mapFile),
-      ...(config.viewer === undefined ? [] : ["--bind", viewerBind(config.viewer)]),
-      "--preview-window",
-      PREVIEW_WINDOW,
-      "--preview",
-      previewCmd,
-    ], { cwd: config.repo });
-  } finally {
-    // The map is only meaningful while fzf is running; never leave it behind.
-    await Deno.remove(mapFile).catch(() => {});
-  }
+  const self = (tail: string) => selfCommand(Deno.execPath(), Deno.mainModule, tail);
+  const previewCmd = self(`__preview ${command.name} ${bat} ${previewTail}`);
+  const picked = await context.runner("fzf", [
+    "--ansi",
+    "--disabled",
+    "--layout",
+    LAYOUT,
+    "--query",
+    query,
+    "--delimiter",
+    FIELD_DELIMITER,
+    "--with-nth",
+    DISPLAY_FIELDS,
+    "--bind",
+    `start:reload:${reloadCmd}`,
+    "--bind",
+    `change:reload:${reloadCmd}`,
+    "--bind",
+    PREVIEW_SCROLL_BIND,
+    "--bind",
+    openBind(self("__open {1}")),
+    "--bind",
+    copyBind(self("__copy {1}")),
+    ...(config.viewer === undefined ? [] : ["--bind", viewerBind(config.viewer)]),
+    "--preview-window",
+    PREVIEW_WINDOW,
+    "--preview",
+    previewCmd,
+  ], { cwd: config.repo });
 
   if (picked.code === FZF_NO_MATCH || picked.code === FZF_ABORTED) {
     return 0;
@@ -298,20 +261,17 @@ export async function runQueryUi(
     return 1;
   }
 
-  // fzf strips the renderer's ANSI codes before printing the selection
-  // (--ansi, verified against a real session), so this is plain
-  // "display_path:line: …" — or just the path for path-only rows. Displayed
-  // paths have gists/ stripped for readability; restore the repo-relative
-  // path before touching the filesystem.
-  const selection = picked.stdout.split("\n").at(0)?.trim() ?? "";
-  if (selection === "") {
+  // fzf prints the whole original row (ANSI stripped by --ansi), hidden
+  // fields included: `real \t line \t display...`. The real path needs no
+  // display->path translation — that is the point of the protocol.
+  const selection = picked.stdout.split("\n").at(0) ?? "";
+  if (selection.trim() === "") {
     return 0;
   }
-  const [displayPath, line] = selection.split(":");
-  const path = toRelPath(displayPath);
+  const [path, line] = selection.split(FIELD_DELIMITER);
   if (flags.path) {
     await out(`${resolve(config.repo, path)}\n`);
     return 0;
   }
-  return await openEditor(context, config.repo, path, line);
+  return await openEditor(context, config.repo, path, line === "" ? undefined : line);
 }

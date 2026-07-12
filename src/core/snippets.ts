@@ -1,7 +1,6 @@
 import { join } from "@std/path";
 
 export const GISTS_DIR = "gists";
-export const DESCRIPTION_FILE = ".description.txt";
 
 export async function contentHash(data: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", data as BufferSource);
@@ -37,10 +36,8 @@ export async function listFilesUnder(repoDir: string, top: string): Promise<stri
 
 export interface LocalGistDir {
   readonly dirname: string;
-  /** gist filenames only, never .description.txt. */
+  /** filename -> content hash. Every regular file is a gist file (no reserved names, ADR-0003). */
   readonly files: Readonly<Record<string, string>>;
-  readonly description: string;
-  readonly descriptionHash: string | null;
 }
 
 export interface GistScan {
@@ -51,8 +48,7 @@ export interface GistScan {
 
 /**
  * Scans gists/: one direct child directory is one gist. Nested files are warned
- * separately because gist filenames cannot contain '/'. .description.txt is
- * reserved metadata and intentionally excluded from LocalGistDir.files.
+ * separately because gist filenames cannot contain '/'.
  */
 export async function scanGistDirs(repoDir: string): Promise<GistScan> {
   const dirs = new Map<string, LocalGistDir>();
@@ -75,30 +71,14 @@ export async function scanGistDirs(repoDir: string): Promise<GistScan> {
           continue;
         }
         if (!child.isFile || child.name === ".gitkeep") continue;
-        if (child.name === DESCRIPTION_FILE) continue;
         files[child.name] = await contentHash(await Deno.readFile(join(abs, child.name)));
       }
-      const description = await readDescription(repoDir, entry.name);
-      dirs.set(entry.name, {
-        dirname: entry.name,
-        files,
-        description,
-        descriptionHash: description === "" ? null : await textHash(description),
-      });
+      dirs.set(entry.name, { dirname: entry.name, files });
     }
   } catch (error) {
     if (!(error instanceof Deno.errors.NotFound)) throw error;
   }
   return { dirs, bareFiles: bareFiles.sort(), nestedFiles: nestedFiles.sort() };
-}
-
-export async function readDescription(repoDir: string, dirname: string): Promise<string> {
-  try {
-    return (await Deno.readTextFile(join(repoDir, GISTS_DIR, dirname, DESCRIPTION_FILE))).trim();
-  } catch (error) {
-    if (error instanceof Deno.errors.NotFound) return "";
-    throw error;
-  }
 }
 
 export async function readGistFiles(
@@ -108,7 +88,7 @@ export async function readGistFiles(
   const result: Record<string, string> = {};
   const dir = join(repoDir, GISTS_DIR, dirname);
   for await (const entry of Deno.readDir(dir)) {
-    if (!entry.isFile || entry.name === DESCRIPTION_FILE || entry.name === ".gitkeep") continue;
+    if (!entry.isFile || entry.name === ".gitkeep") continue;
     result[entry.name] = await Deno.readTextFile(join(dir, entry.name));
   }
   return result;

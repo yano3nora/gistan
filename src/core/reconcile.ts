@@ -16,6 +16,7 @@ export interface RemoteInfo {
 }
 
 export interface ReconcileItem {
+  /** = gist id when published (index keys are gist ids, ADR-0003). */
   readonly dirname: string;
   readonly condition: GistCondition;
   readonly entry?: GistIndexEntry;
@@ -31,11 +32,12 @@ export function reconcile(
   return [...names].sort().map((dirname) => {
     const entry = state.gists[dirname];
     const dir = local.get(dirname);
-    return { dirname, condition: classify(entry, dir, remote), entry, local: dir };
+    return { dirname, condition: classify(dirname, entry, dir, remote), entry, local: dir };
   });
 }
 
 function classify(
+  dirname: string,
   entry: GistIndexEntry | undefined,
   dir: LocalGistDir | undefined,
   remote: ReadonlyMap<string, RemoteInfo> | undefined,
@@ -44,10 +46,14 @@ function classify(
   if (entry && !dir) return "dir-missing";
   if (!entry || !dir) return "unpublished";
 
-  const localDrift = entry.synced_description_hash !== dir.descriptionHash ||
+  // Only file hashes count as local drift: descriptions cannot drift locally
+  // (publish -d writes index and remote together, ADR-0003). A remote
+  // description edit bumps the gist's updated_at, so it surfaces as
+  // remote-drift without any description-specific comparison here.
+  const localDrift =
     JSON.stringify(sortRecord(entry.files)) !== JSON.stringify(sortRecord(dir.files));
   if (remote === undefined) return localDrift ? "local-drift" : "remote-unknown";
-  const live = remote.get(entry.id);
+  const live = remote.get(dirname);
   if (!live) return "remote-deleted";
   const remoteDrift = live.updated_at !== entry.remote_updated_at;
   if (localDrift && remoteDrift) return "conflict";

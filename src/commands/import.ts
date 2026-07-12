@@ -1,9 +1,8 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { join } from "@std/path";
-import { slugify } from "../core/description.ts";
 import type { GistSummary } from "../core/gh.ts";
 import { getGistFiles, listOwnGistSummaries } from "../core/gh.ts";
-import { contentHash, DESCRIPTION_FILE, textHash } from "../core/snippets.ts";
+import { contentHash } from "../core/snippets.ts";
 import type { State } from "../core/state.ts";
 import { loadState, saveState } from "../core/state.ts";
 import { exists, requireConfig } from "./shared.ts";
@@ -27,23 +26,21 @@ export async function run(command: CommandArgs, context: CommandContext): Promis
   );
   const targets = limit === undefined ? summaries : summaries.slice(0, limit);
   let state = await loadState(config.repo);
-  const importedIds = new Set(Object.values(state.gists).map((e) => e.id));
   let imported = 0, skipped = 0, failed = 0;
   for (const [i, gist] of targets.entries()) {
     // Already-indexed ids skip instantly with no output so re-runs stay quiet;
     // everything past this line hits the network, so announce progress first.
-    if (importedIds.has(gist.id)) {
+    if (state.gists[gist.id]) {
       skipped++;
       continue;
     }
     await out(`importing ${gist.id} (${i + 1}/${targets.length})…\n`);
     try {
-      const r = await importOne(config.repo, state, gist, context, err);
+      const r = await importOne(config.repo, state, gist, context);
       if (r === "skipped") skipped++;
       else {
         state = r;
         await saveState(config.repo, state);
-        importedIds.add(gist.id);
         imported++;
       }
     } catch (e) {
@@ -57,72 +54,50 @@ export async function run(command: CommandArgs, context: CommandContext): Promis
   return failed > 0 ? 1 : 0;
 }
 
+/**
+ * The dir is simply gists/<gist-id>/ (ADR-0003) — no dirname derivation from
+ * the description, no reserved filenames; the description goes into the
+ * index entry.
+ */
 async function importOne(
   repo: string,
   state: State,
   gist: GistSummary,
   context: CommandContext,
-  err: (t: string) => Promise<void>,
 ): Promise<State | "skipped"> {
   const files = await getGistFiles(context.runner, gist.id);
-  if (files.some((f) => f.filename === DESCRIPTION_FILE)) {
-    await err(`warn: ${gist.id} contains reserved ${DESCRIPTION_FILE}; skipped\n`);
-    return "skipped";
-  }
   if (files.length === 0) throw new Error("gist has no files");
-  const dir = await allocateDir(repo, state, gist.description, gist.id, context);
-  if (dir === undefined) return "skipped";
-  await Deno.mkdir(join(repo, "gists", dir), { recursive: true });
+  const dirPath = join(repo, "gists", gist.id);
+  // The id is not indexed (checked by the caller), so an existing dir is a
+  // hand-made squatter — overriding it needs an explicit yes.
+  if (await exists(dirPath)) {
+    if (
+      !(await context.confirm(`gists/${gist.id} already exists and is not indexed. Override it?`))
+    ) {
+      return "skipped";
+    }
+    await Deno.remove(dirPath, { recursive: true });
+  }
+  await Deno.mkdir(dirPath, { recursive: true });
   const hashes: Record<string, string> = {};
   for (const f of files) {
     if (f.content === undefined || f.truncated) {
       throw new Error(`file ${f.filename} is truncated (>1MB) — import it manually`);
     }
-    await Deno.writeTextFile(join(repo, "gists", dir, f.filename), f.content);
+    await Deno.writeTextFile(join(dirPath, f.filename), f.content);
     hashes[f.filename] = await contentHash(new TextEncoder().encode(f.content));
   }
-  const desc = gist.description.trim();
-  if (desc !== "") await Deno.writeTextFile(join(repo, "gists", dir, DESCRIPTION_FILE), desc);
   return {
-    version: 2,
+    version: 3,
     gists: {
       ...state.gists,
-      [dir]: {
-        id: gist.id,
+      [gist.id]: {
         visibility: gist.public ? "public" : "secret",
+        description: gist.description.trim(),
         remote_updated_at: gist.updated_at,
-        synced_description_hash: desc === "" ? null : await textHash(desc),
         files: hashes,
       },
     },
+    locals: state.locals,
   };
-}
-
-async function allocateDir(
-  repo: string,
-  state: State,
-  description: string,
-  id: string,
-  context: CommandContext,
-): Promise<string | undefined> {
-  const base = slugify(description) || `gist--${id.slice(0, 8)}`;
-  if (!(await exists(join(repo, "gists", base)))) return base;
-  if (!state.gists[base]) {
-    if (await context.confirm(`gists/${base} already exists and is not indexed. Override it?`)) {
-      await Deno.remove(join(repo, "gists", base), { recursive: true });
-      return base;
-    }
-    return undefined;
-  }
-  const suffixed = `${base}--${id.slice(0, 8)}`;
-  if (!(await exists(join(repo, "gists", suffixed)))) return suffixed;
-  if (!state.gists[suffixed]) {
-    if (
-      await context.confirm(`gists/${suffixed} already exists and is not indexed. Override it?`)
-    ) {
-      await Deno.remove(join(repo, "gists", suffixed), { recursive: true });
-      return suffixed;
-    }
-  }
-  return undefined;
 }

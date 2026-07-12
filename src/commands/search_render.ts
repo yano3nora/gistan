@@ -1,3 +1,5 @@
+import { descriptionFor, displayPath } from "../core/display.ts";
+import { loadDescriptionsSafe } from "./actions.ts";
 import type { CommandContext } from "./types.ts";
 import { writeText } from "./types.ts";
 
@@ -15,10 +17,12 @@ import { writeText } from "./types.ts";
  * case-insensitive LITERAL (no regex — `'` `^` `$` are ordinary characters).
  *
  * Runs with cwd = repo (fzf's reload inherits fzf's cwd), so no config
- * resolution happens here. Output: one row per file — the path-hit tier
- * first, then content-only files, each tier display-path-sorted —
- * `<display path>:<line>: <excerpt>` for content hits or just the display
- * path for path-only hits. gists/ is stripped from display, stars/ kept.
+ * resolution happens here. Output rows use the shared 3-field protocol
+ * (see runQueryUi): `real\tline\tdisplay:line: excerpt` for content hits,
+ * `real\t\tdisplay` for path-only hits — fzf shows field 3+ only, so gist
+ * ids stay hidden (ADR-0003) while every bind still gets the real path.
+ * Descriptions (from the index / star cache) both count as match targets and
+ * ride along as a dim suffix, disambiguating same-named files across gists.
  */
 
 const HIGHLIGHT = "\x1b[1;31m";
@@ -50,56 +54,75 @@ export async function runSearchRender(
   const { positives, negatives } = parseTerms(query);
 
   const files = await listFiles(context);
+  const descriptions = await loadDescriptionsSafe();
+  const describe = (file: string) => descriptionFor(descriptions, file);
+
   // Zero positive terms (empty query, or only exclusions) = plain file list.
   if (positives.length === 0) {
-    return await emit(context, files.map(displayPath).sort());
+    const rows = [...files]
+      .map((file) => ({ file, display: displayPath(file) }))
+      .sort((a, b) => compare(a.display, b.display))
+      .map(({ file, display }) => `${file}\t\t${display}${descSuffix(describe(file), [])}`);
+    return await emit(context, rows);
   }
 
   // File-level AND across positive terms, minus every negative term's set.
-  let candidates = await termSet(context, positives[0], files);
+  let candidates = await termSet(context, positives[0], files, describe);
   for (const term of positives.slice(1)) {
-    const set = await termSet(context, term, files);
+    const set = await termSet(context, term, files, describe);
     candidates = new Set([...candidates].filter((file) => set.has(file)));
   }
   for (const term of negatives) {
-    const set = await termSet(context, term, files);
+    const set = await termSet(context, term, files, describe);
     candidates = new Set([...candidates].filter((file) => !set.has(file)));
   }
 
   const hits = await firstHits(context, positives, [...candidates]);
   // The only ranking that exists (deliberately no scoring beyond this):
-  // files whose display path contains a positive term form the first tier —
-  // a dirname/filename hit is a stronger signal than a body hit. Within
-  // each tier the order stays display-path ascending, so results remain
-  // deterministic and directory-clustered.
-  const inPath = (display: string) => {
-    const lower = display.toLowerCase();
+  // files whose display path OR description contains a positive term form
+  // the first tier — both are stronger signals than a body hit (the
+  // description plays the disambiguation role dirnames used to, ADR-0003).
+  // Within each tier the order stays display-path ascending, so results
+  // remain deterministic and gist-clustered.
+  const inMeta = (display: string, desc: string) => {
+    const lower = `${display}\n${desc}`.toLowerCase();
     return positives.some((term) => lower.includes(term.toLowerCase()));
   };
   const rows = [...candidates]
-    .map((file) => ({ display: displayPath(file), hit: hits.get(file) }))
+    .map((file) => ({
+      file,
+      display: displayPath(file),
+      desc: describe(file),
+      hit: hits.get(file),
+    }))
     .sort((a, b) => {
-      const tier = Number(!inPath(a.display)) - Number(!inPath(b.display));
+      const tier = Number(!inMeta(a.display, a.desc)) - Number(!inMeta(b.display, b.desc));
       if (tier !== 0) return tier;
-      return a.display < b.display ? -1 : a.display > b.display ? 1 : 0;
+      return compare(a.display, b.display);
     })
-    .map(({ display, hit }) =>
+    .map(({ file, display, desc, hit }) =>
       hit === undefined
-        // Path-only match: the term(s) only occur in the path itself.
-        ? highlight(display, positives, "")
-        : `${highlight(display, positives, "")}:${DIM}${hit.line}${RESET}: ` +
-          `${DIM}${highlight(excerpt(hit.text, positives), positives, DIM)}${RESET}`
+        // Path/description-only match: the term(s) never occur in the body.
+        ? `${file}\t\t${highlight(display, positives, "")}${descSuffix(desc, positives)}`
+        : `${file}\t${hit.line}\t${highlight(display, positives, "")}:${DIM}${hit.line}${RESET}: ` +
+          `${DIM}${highlight(excerpt(hit.text, positives), positives, DIM)}${RESET}` +
+          descSuffix(desc, positives)
     );
   return await emit(context, rows);
+}
+
+function descSuffix(desc: string, positives: readonly string[]): string {
+  if (desc === "") return "";
+  return `  ${DIM}— ${highlight(desc, positives, DIM)}${RESET}`;
+}
+
+function compare(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 async function emit(context: CommandContext, rows: readonly string[]): Promise<number> {
   if (rows.length > 0) await writeText(context.stdout, rows.join("\n") + "\n");
   return 0;
-}
-
-function displayPath(path: string): string {
-  return path.startsWith("gists/") ? path.slice("gists/".length) : path;
 }
 
 /**
@@ -109,19 +132,23 @@ function displayPath(path: string): string {
  */
 async function listFiles(context: CommandContext): Promise<string[]> {
   const result = await context.runner("rg", ["--files", "--no-ignore", "gists", "stars"]);
-  return result.stdout.split("\n").filter((line) => line !== "");
+  // A tab would corrupt the 3-field row protocol (see runQueryUi), so such
+  // paths cannot be represented — drop them (`gistan new` refuses to create
+  // them; this guards hand-made ones).
+  return result.stdout.split("\n").filter((line) => line !== "" && !line.includes("\t"));
 }
 
 /**
  * Files matching one term: content matches (rg -li; -F literal, -i
- * case-insensitive) UNION files whose display path contains the term — rg's
- * content search never looks at filenames, so dirname/filename hits must be
- * merged in explicitly.
+ * case-insensitive) UNION files whose display path or description contains
+ * the term — rg's content search never looks at filenames or the index, so
+ * both metadata hits must be merged in explicitly.
  */
 async function termSet(
   context: CommandContext,
   term: string,
   files: readonly string[],
+  describe: (file: string) => string,
 ): Promise<Set<string>> {
   const result = await context.runner("rg", [
     "-li",
@@ -135,7 +162,10 @@ async function termSet(
   const set = new Set(result.stdout.split("\n").filter((line) => line !== ""));
   const needle = term.toLowerCase();
   for (const file of files) {
-    if (displayPath(file).toLowerCase().includes(needle)) set.add(file);
+    if (
+      displayPath(file).toLowerCase().includes(needle) ||
+      describe(file).toLowerCase().includes(needle)
+    ) set.add(file);
   }
   return set;
 }
@@ -144,7 +174,7 @@ async function termSet(
  * One rg run over the surviving files gives each file's first line matching
  * any positive term (`path:line:text`, --max-count=1 per file). -H forces
  * the path prefix even when only one file survives. Files absent from the
- * output had path-only matches.
+ * output had metadata-only matches.
  */
 async function firstHits(
   context: CommandContext,

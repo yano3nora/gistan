@@ -10,21 +10,30 @@ async function publishedTwo() {
   await Deno.writeTextFile(join(f.repo, "gists", "one", "a.md"), "A");
   await Deno.writeTextFile(join(f.repo, "gists", "one", "b.md"), "B");
   await saveState(f.repo, {
-    version: 2,
+    version: 3,
     gists: {
       one: {
-        id: "gid",
         visibility: "public",
+        description: "",
         remote_updated_at: AT,
-        synced_description_hash: null,
         files: { "a.md": "ha", "b.md": "hb" },
       },
     },
+    locals: {},
   });
   return f;
 }
 
-Deno.test("rm updates index after deleting a published gist file remotely", async () => {
+async function assertMissing(path: string) {
+  try {
+    await Deno.stat(path);
+    throw new Error(`expected missing: ${path}`);
+  } catch (e) {
+    if (!(e instanceof Deno.errors.NotFound)) throw e;
+  }
+}
+
+Deno.test("rm updates the index after deleting a published gist file remotely", async () => {
   const { home, repo } = await publishedTwo();
   let body = "";
   const runner: Runner = (_c, args, opt) => {
@@ -41,50 +50,16 @@ Deno.test("rm updates index after deleting a published gist file remotely", asyn
   assertEquals((await loadState(repo)).gists.one.remote_updated_at, AT2);
 });
 
-Deno.test("rm description file is local-only and does not PATCH or count as last gist file", async () => {
-  const { home, repo } = await fixture();
-  await Deno.mkdir(join(repo, "gists", "one"), { recursive: true });
-  await Deno.writeTextFile(join(repo, "gists", "one", "a.md"), "A");
-  await Deno.writeTextFile(join(repo, "gists", "one", ".description.txt"), "D");
-  await saveState(repo, {
-    version: 2,
-    gists: {
-      one: {
-        id: "gid",
-        visibility: "public",
-        remote_updated_at: AT,
-        synced_description_hash: "dh",
-        files: { "a.md": "ha" },
-      },
-    },
-  });
-  const calls: string[] = [];
-  const runner: Runner = (_c, args) => {
-    calls.push(args.join(" "));
-    return Promise.resolve({ code: 0, stdout: AT2, stderr: "" });
-  };
-  const io = memoryContext(runner, home, { confirmAnswer: true });
-  assertEquals(await run({ name: "rm", args: ["one/.description.txt"] }, io.context), 0);
-  assertEquals(calls.some((c) => c.includes("PATCH") || c.includes("DELETE")), false);
-  assertEquals(io.confirms.some((c) => c.includes("last gist file")), false);
-  assertEquals((await loadState(repo)).gists.one.synced_description_hash, "dh");
-});
-
-Deno.test("rm asks gist deletion for the last publishable file", async () => {
+Deno.test("rm asks for gist deletion when removing the last publishable file", async () => {
   const { home, repo } = await fixture();
   await Deno.mkdir(join(repo, "gists", "one"), { recursive: true });
   await Deno.writeTextFile(join(repo, "gists", "one", "a.md"), "A");
   await saveState(repo, {
-    version: 2,
+    version: 3,
     gists: {
-      one: {
-        id: "gid",
-        visibility: "public",
-        remote_updated_at: AT,
-        synced_description_hash: null,
-        files: { "a.md": "h" },
-      },
+      one: { visibility: "public", description: "", remote_updated_at: AT, files: { "a.md": "h" } },
     },
+    locals: {},
   });
   const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home, {
     confirmAnswer: [true, false],
@@ -93,21 +68,16 @@ Deno.test("rm asks gist deletion for the last publishable file", async () => {
   assert(io.confirms.some((c) => c.includes("last gist file")));
 });
 
-Deno.test("rm removes index when last file deletion also deletes gist", async () => {
+Deno.test("rm removes the index entry when last-file deletion also deletes the gist", async () => {
   const { home, repo } = await fixture();
   await Deno.mkdir(join(repo, "gists", "one"), { recursive: true });
   await Deno.writeTextFile(join(repo, "gists", "one", "a.md"), "A");
   await saveState(repo, {
-    version: 2,
+    version: 3,
     gists: {
-      one: {
-        id: "gid",
-        visibility: "public",
-        remote_updated_at: AT,
-        synced_description_hash: null,
-        files: { "a.md": "h" },
-      },
+      one: { visibility: "public", description: "", remote_updated_at: AT, files: { "a.md": "h" } },
     },
+    locals: {},
   });
   const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home, {
     confirmAnswer: true,
@@ -116,14 +86,31 @@ Deno.test("rm removes index when last file deletion also deletes gist", async ()
   assertEquals((await loadState(repo)).gists.one, undefined);
 });
 
-Deno.test("rm refuses stars mirror", async () => {
+Deno.test("rm cleans up a dangling locals entry when the now-empty unpublished dir is removed", async () => {
+  const { home, repo } = await fixture();
+  await Deno.mkdir(join(repo, "gists", "_local1"), { recursive: true });
+  await Deno.writeTextFile(join(repo, "gists", "_local1", "a.md"), "A");
+  await saveState(repo, {
+    version: 3,
+    gists: {},
+    locals: { _local1: { description: "Draft" } },
+  });
+  const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home, {
+    confirmAnswer: true,
+  });
+  assertEquals(await run({ name: "rm", args: ["_local1/a.md"] }, io.context), 0);
+  assertEquals((await loadState(repo)).locals._local1, undefined);
+  await assertMissing(join(repo, "gists", "_local1"));
+});
+
+Deno.test("rm refuses the stars mirror", async () => {
   const { home } = await fixture();
   const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home);
   assertEquals(await run({ name: "rm", args: ["stars/x.md"] }, io.context), 1);
   assert(io.stderr.includes("read-only"));
 });
 
-Deno.test("rm abort keeps file", async () => {
+Deno.test("rm abort keeps the file", async () => {
   const { home, repo } = await publishedTwo();
   const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home, {
     confirmAnswer: false,
@@ -132,7 +119,7 @@ Deno.test("rm abort keeps file", async () => {
   assertEquals(await Deno.readTextFile(join(repo, "gists", "one", "a.md")), "A");
 });
 
-Deno.test("rm errors for missing file", async () => {
+Deno.test("rm errors for a missing file", async () => {
   const { home } = await fixture();
   const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home);
   assertEquals(await run({ name: "rm", args: ["one/a.md"] }, io.context), 1);

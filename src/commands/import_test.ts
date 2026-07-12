@@ -20,7 +20,16 @@ function importRunner(items: unknown[], details: Record<string, unknown>): Runne
   };
 }
 
-Deno.test("import multi-file gist creates dir, files, description and index", async () => {
+async function assertMissing(path: string) {
+  try {
+    await Deno.stat(path);
+    throw new Error(`expected missing: ${path}`);
+  } catch (e) {
+    if (!(e instanceof Deno.errors.NotFound)) throw e;
+  }
+}
+
+Deno.test("import creates gists/<gist-id>/ directly and stores description in the index", async () => {
   const { home, repo } = await fixture();
   const items = [{ id: "g1", description: "My Gist", public: true, updated_at: AT }];
   const details = {
@@ -33,27 +42,23 @@ Deno.test("import multi-file gist creates dir, files, description and index", as
   };
   const io = memoryContext(importRunner(items, details), home);
   assertEquals(await run({ name: "import", args: [] }, io.context), 0);
-  assertEquals(await Deno.readTextFile(join(repo, "gists", "my-gist", "a.md")), "A");
-  assertEquals(
-    await Deno.readTextFile(join(repo, "gists", "my-gist", ".description.txt")),
-    "My Gist",
-  );
-  assertEquals((await loadState(repo)).gists["my-gist"].id, "g1");
+  assertEquals(await Deno.readTextFile(join(repo, "gists", "g1", "a.md")), "A");
+  assertEquals(await Deno.readTextFile(join(repo, "gists", "g1", "b.ts")), "B");
+  const state = await loadState(repo);
+  assertEquals(state.gists.g1.description, "My Gist");
+  assertEquals(state.gists.g1.visibility, "public");
+  // No reserved description file — description lives only in the index (ADR-0003).
+  await assertMissing(join(repo, "gists", "g1", ".description.txt"));
 });
 
-Deno.test("import skips already indexed gist id on re-import", async () => {
+Deno.test("import skips an already indexed gist id on re-import", async () => {
   const { home, repo } = await fixture();
   await saveState(repo, {
-    version: 2,
+    version: 3,
     gists: {
-      existing: {
-        id: "g1",
-        visibility: "public",
-        remote_updated_at: AT,
-        synced_description_hash: null,
-        files: {},
-      },
+      g1: { visibility: "public", description: "", remote_updated_at: AT, files: {} },
     },
+    locals: {},
   });
   const io = memoryContext(
     importRunner([{ id: "g1", description: "Again", public: true, updated_at: AT }], {}),
@@ -63,36 +68,10 @@ Deno.test("import skips already indexed gist id on re-import", async () => {
   assert(io.stdout.includes("0 imported, 1 skipped"));
 });
 
-Deno.test("import uses id suffix when slug collides with indexed dir", async () => {
+Deno.test("import confirms override when an unindexed dir has the same gist id", async () => {
   const { home, repo } = await fixture();
-  await Deno.mkdir(join(repo, "gists", "same"), { recursive: true });
-  await saveState(repo, {
-    version: 2,
-    gists: {
-      same: {
-        id: "old",
-        visibility: "public",
-        remote_updated_at: AT,
-        synced_description_hash: null,
-        files: {},
-      },
-    },
-  });
-  const id = "abcdef123456";
-  const io = memoryContext(
-    importRunner([{ id, description: "Same", public: false, updated_at: AT }], {
-      [id]: { files: { "a.md": { filename: "a.md", content: "A" } } },
-    }),
-    home,
-  );
-  assertEquals(await run({ name: "import", args: [] }, io.context), 0);
-  assertEquals(await Deno.readTextFile(join(repo, "gists", "same--abcdef12", "a.md")), "A");
-});
-
-Deno.test("import confirms override when unindexed dir has same generated name", async () => {
-  const { home, repo } = await fixture();
-  await Deno.mkdir(join(repo, "gists", "same"), { recursive: true });
-  await Deno.writeTextFile(join(repo, "gists", "same", "old.md"), "old");
+  await Deno.mkdir(join(repo, "gists", "g1"), { recursive: true });
+  await Deno.writeTextFile(join(repo, "gists", "g1", "old.md"), "old");
   const io = memoryContext(
     importRunner([{ id: "g1", description: "Same", public: true, updated_at: AT }], {
       g1: { files: { "a.md": { filename: "a.md", content: "A" } } },
@@ -102,12 +81,14 @@ Deno.test("import confirms override when unindexed dir has same generated name",
   );
   assertEquals(await run({ name: "import", args: [] }, io.context), 0);
   assert(io.confirms.some((c) => c.includes("Override")));
-  await assertMissing(join(repo, "gists", "same", "old.md"));
+  await assertMissing(join(repo, "gists", "g1", "old.md"));
+  assertEquals(await Deno.readTextFile(join(repo, "gists", "g1", "a.md")), "A");
 });
 
-Deno.test("import decline override skips gist", async () => {
+Deno.test("import decline override skips the gist and leaves the dir untouched", async () => {
   const { home, repo } = await fixture();
-  await Deno.mkdir(join(repo, "gists", "same"), { recursive: true });
+  await Deno.mkdir(join(repo, "gists", "g1"), { recursive: true });
+  await Deno.writeTextFile(join(repo, "gists", "g1", "old.md"), "old");
   const io = memoryContext(
     importRunner([{ id: "g1", description: "Same", public: true, updated_at: AT }], {
       g1: { files: { "a.md": { filename: "a.md", content: "A" } } },
@@ -116,33 +97,37 @@ Deno.test("import decline override skips gist", async () => {
     { confirmAnswer: false },
   );
   assertEquals(await run({ name: "import", args: [] }, io.context), 0);
-  assertEquals((await loadState(repo)).gists.same, undefined);
+  assertEquals((await loadState(repo)).gists.g1, undefined);
+  assertEquals(await Deno.readTextFile(join(repo, "gists", "g1", "old.md")), "old");
 });
 
-Deno.test("import warns and skips gist containing reserved description filename", async () => {
+Deno.test("import fails a gist with no files", async () => {
   const { home } = await fixture();
   const io = memoryContext(
-    importRunner([{ id: "g1", description: "Bad", public: true, updated_at: AT }], {
-      g1: { files: { ".description.txt": { filename: ".description.txt", content: "x" } } },
+    importRunner([{ id: "g1", description: "Empty", public: true, updated_at: AT }], {
+      g1: { files: {} },
     }),
     home,
   );
-  assertEquals(await run({ name: "import", args: [] }, io.context), 0);
-  assert(io.stderr.includes("reserved .description.txt"));
-  assert(io.stdout.includes("0 imported, 1 skipped"));
+  assertEquals(await run({ name: "import", args: [] }, io.context), 1);
+  assert(io.stderr.includes("gist has no files"));
 });
 
-Deno.test("import returns error for invalid limit", async () => {
+Deno.test("import reports a truncated file as a per-item failure", async () => {
+  const { home } = await fixture();
+  const io = memoryContext(
+    importRunner([{ id: "g1", description: "Bad", public: true, updated_at: AT }], {
+      g1: { files: { "big.md": { filename: "big.md", truncated: true } } },
+    }),
+    home,
+  );
+  assertEquals(await run({ name: "import", args: [] }, io.context), 1);
+  assert(io.stderr.includes("truncated"));
+  assert(io.stdout.includes("0 imported, 0 skipped, 1 failed"));
+});
+
+Deno.test("import returns error for an invalid --limit", async () => {
   const { home } = await fixture();
   const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home);
   assertEquals(await run({ name: "import", args: ["--limit", "0"] }, io.context), 2);
 });
-
-async function assertMissing(path: string) {
-  try {
-    await Deno.stat(path);
-    throw new Error("expected missing");
-  } catch (e) {
-    if (!(e instanceof Deno.errors.NotFound)) throw e;
-  }
-}

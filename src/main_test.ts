@@ -237,6 +237,121 @@ Deno.test("__preview is not advertised in usage()", () => {
   assertEquals(usage().includes("__preview"), false);
 });
 
+Deno.test("__grep-render dispatches to the hidden renderer, not the search fallback", async () => {
+  const io = memoryContext();
+  let searchCalled = false;
+
+  // The default runner answers every rg call with empty output, so the
+  // renderer prints nothing and exits 0; falling back to search would
+  // instead fail on the missing config (exit 1 + stderr).
+  const code = await run(["__grep-render", "foo"], {
+    context: io.context,
+    commands: {
+      search() {
+        searchCalled = true;
+        return 1;
+      },
+    },
+  });
+
+  assertEquals(code, 0);
+  assertEquals(searchCalled, false);
+  assertEquals(io.stderr, "");
+});
+
+Deno.test("__grep-render is not advertised in usage()", () => {
+  assertEquals(usage().includes("__grep-render"), false);
+});
+
+Deno.test("__list dispatches to the hidden list renderer, not the search fallback", async () => {
+  const io = memoryContext();
+  let searchCalled = false;
+
+  const code = await run(["__list"], {
+    context: io.context,
+    commands: {
+      search() {
+        searchCalled = true;
+        return 1;
+      },
+    },
+  });
+
+  assertEquals(code, 0);
+  assertEquals(searchCalled, false);
+  assertEquals(io.stderr, "");
+});
+
+Deno.test("__list is not advertised in usage()", () => {
+  assertEquals(usage().includes("__list"), false);
+});
+
+Deno.test("__open dispatches to the hidden open action, not the search fallback", async () => {
+  const io = memoryContext();
+  let searchCalled = false;
+
+  // An empty {1} makes the action a silent no-op (exit 0); the search
+  // fallback would instead fail on the missing config (exit 1 + stderr).
+  const code = await run(["__open", ""], {
+    context: io.context,
+    commands: {
+      search() {
+        searchCalled = true;
+        return 1;
+      },
+    },
+  });
+
+  assertEquals(code, 0);
+  assertEquals(searchCalled, false);
+  assertEquals(io.stderr, "");
+});
+
+Deno.test("__open is not advertised in usage()", () => {
+  assertEquals(usage().includes("__open"), false);
+});
+
+Deno.test("__copy dispatches to the hidden copy action, not the search fallback", async () => {
+  const io = memoryContext();
+  let searchCalled = false;
+
+  const code = await run(["__copy", ""], {
+    context: io.context,
+    commands: {
+      search() {
+        searchCalled = true;
+        return 1;
+      },
+    },
+  });
+
+  assertEquals(code, 0);
+  assertEquals(searchCalled, false);
+  assertEquals(io.stderr, "");
+});
+
+Deno.test("__copy is not advertised in usage()", () => {
+  assertEquals(usage().includes("__copy"), false);
+});
+
+Deno.test("dispatches the push command (ADR-0003: local-drift bulk publish)", async () => {
+  const io = memoryContext();
+  let received: CommandArgs | undefined;
+
+  const code = await run(["push"], {
+    context: io.context,
+    commands: {
+      push(command) {
+        received = command;
+        return 0;
+      },
+    },
+  });
+
+  assertEquals(code, 0);
+  assertEquals(received, { name: "push", args: [] });
+});
+
 Deno.test("a command that throws exits 1 with one error line, not a stack trace", async () => {
   const io = memoryContext();
   const code = await run(["list"], {

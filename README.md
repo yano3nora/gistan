@@ -7,16 +7,20 @@ truth; GitHub Gist is only the explicit publish surface.
 
 ```text
 <gist-repo>/
-├ gists/<dirname>/<files...>   # 1 directory = 1 gist
+├ gists/<gist-id>/<files...>   # 1 directory = 1 gist; the dirname IS the gist id
+├ gists/<local-id>/<files...>  # not published yet (`_`-prefixed id assigned by `gistan new`)
 ├ stars/<owner>/<gist-id>/     # read-only mirror of starred gists (`gistan star sync`)
-├ .gistan/state.json           # index v2
+├ .gistan/state.json           # index v3
 └ .gistan/cache/stars.json     # star mirror cache
 ```
 
-`gists/<dirname>/.description.txt` is reserved metadata. Its trimmed content becomes the gist
-description, but it is **never uploaded as a gist file**. Multi-line descriptions are sent as-is;
-GitHub UI rendering is your responsibility. A remote gist containing a real `.description.txt` file
-is skipped on import.
+**1 directory = 1 gist, and dirnames are tool-managed ids** (ADR-0003). GitHub Gist has no title
+concept and no way to reflect a directory name, so gistan does not ask you to name or categorize
+directories at all — search and list show a flat filename view (ids hidden), descriptions ride along
+as search targets and annotations, and ctrl-y in `gistan search` copies the id/URL whenever a
+command needs one. Descriptions live in the index (`new -d` / `publish -d`, pulled back on
+`gistan pull`), never as files, so local files and the remote gist match byte-for-byte with no
+reserved filenames.
 
 ## Getting Started
 
@@ -51,29 +55,39 @@ video on top of it.
 
 ```sh
 gistan root init ~/gistan-repo     # scaffold the gist repo
-gistan import                      # import existing gists into gists/
+gistan import                      # import existing gists into gists/<gist-id>/
 
-gistan new -d "desc" hello.md      # create gists/hello/hello.md with description
-gistan new tools/helper.ts         # adds gists/tools/helper.ts
-gistan search deno deploy !wip     # document search: space = AND, !term = exclude, rows are path:line: excerpt
+gistan new hello.md                # create gists/<local-id>/hello.md (id printed, editor opens)
+gistan new -d "desc" hello.md      # same, with a description (stored in the index)
+gistan new note.md --id <id>       # add a file to an existing gist dir
+gistan new hello.md --publish      # create, edit, then publish in one go (secret by default)
+
+gistan search deno deploy !wip     # document search: space = AND, !term = exclude; descriptions match too 
+                                   # ctrl-y copies the selected item's id/URL, ctrl-o opens the gist
+
 gistan hello                       # sugar: unrecognized input falls back to `gistan search hello`
 gistan grep 'error\s+handling'     # line-level regex grep when you need the exact matching line
-gistan list                        # list gists/
+gistan list                        # flat filename view with descriptions and ids/URLs
 
-gistan publish hello               # publishes gists/hello as one gist (secret by default)
-gistan publish hello --public      # public must be an explicit opt-in
+gistan push                        # list every locally drifted gist, one confirm, update them all
+gistan pull                        # the same for remote drift (conflicts go to status --fix)
 gistan status                      # only conditions that need attention (like `git status`)
 gistan status --all                # the full listing, including in-sync/published gists
 gistan status --remote             # includes remote drift
-gistan pull hello                  # overwrite local dir from remote after confirmation on conflict
-gistan status --fix                # interactive fix of drifts
+gistan status --fix                # interactive repair: conflicts, deleted remotes, missing dirs
 
-gistan unpublish hello             # delete remote gist, keep local dir
-gistan rm hello/hello.md           # delete one file; asks if it is the last file
+gistan publish <id|url>            # per-gist maintenance: publish/update one gist (secret by default)
+gistan publish <id|url> --public   # public must be an explicit opt-in
+gistan publish <id|url> -d "desc"  # update the description
+gistan unpublish <id|url>          # delete remote gist; local files move to a fresh local id
+gistan rm hello.md                 # delete one file (fzf pick); asks if it is the last file
 
 gistan star sync                   # mirror starred gists into stars/<owner>/<gist-id>/ (idempotent)
 gistan star add <gist-url>         # star a gist and mirror it immediately
 ```
+
+The everyday loop is `new` → edit → `push` / `pull`. Individual `publish` / `unpublish` are
+id-addressed maintenance commands — grab the id with ctrl-y from `gistan search` first.
 
 Daily operations above never touch the repo's own git history — they only read/write files and talk
 to `gist.github.com` via `gh`. Setup and origin git housekeeping (pushing/pulling the notes repo
@@ -99,9 +113,9 @@ rg -l TODO $(gistan root path)/gists           # or anything else that walks fil
 
 One integration point is built in: set `viewer` in `~/.config/gistan/config.toml` and ctrl-v inside
 `gistan search` / `gistan grep` hands the selected file to that command (a markdown reader like
-`leaf` or `glow` fits well). Quitting the viewer drops you back into the result list, so
-browse → read → browse loops never leave fzf. The command must not contain parentheses (an fzf
-`execute()` parsing limitation).
+`leaf` or `glow` fits well). Quitting the viewer drops you back into the result list, so browse →
+read → browse loops never leave fzf. The command must not contain parentheses (an fzf `execute()`
+parsing limitation).
 
 ```toml
 # ~/.config/gistan/config.toml
@@ -120,7 +134,7 @@ mise exec -- deno task compile
 Important rules:
 
 - GitHub API access goes through `gh api` subprocesses only.
-- `status` / `pull` / `publish` drift judgment must share `src/core/reconcile.ts`.
+- `status` / `push` / `pull` / `publish` drift judgment must share `src/core/reconcile.ts`.
 - Do not commit, push, create releases, or publish packages from the agent; humans decide external
   publication.
 
@@ -136,36 +150,43 @@ src/
 │                         # removed-command hints, hidden renderer routing
 ├ commands/
 │ ├ types.ts              # CommandContext (stdout/runner/confirm/editor) — every command's interface
-│ ├ shared.ts             # config guard, fzf binds (ctrl-o browse / preview / viewer), and
-│ │                       # runQueryUi — the whole fzf session search and grep share
+│ ├ shared.ts             # config guard, the 3-field fzf row protocol (real\tline\tdisplay),
+│ │                       # binds (ctrl-o open / ctrl-y copy / ctrl-v viewer), and runQueryUi —
+│ │                       # the whole fzf session search and grep share
 │ ├ new.ts / edit.ts / list.ts / rm.ts     # local file operations (fzf pick + $EDITOR)
 │ ├ search.ts             # document-unit search: fzf --disabled + self-reload UI
 │ ├ search_render.ts      #   hidden `__search-render`: query parse, AND/exclude, excerpt, colors
+│ ├ grep_render.ts        #   hidden `__grep-render`: line-level rg rendering with id-less display
 │ ├ preview_render.ts     #   hidden `__preview`: bat highlight + match emphasis for fzf previews
-│ ├ grep.ts               # line-level regex search (rg reload)
-│ ├ publish.ts / unpublish.ts / pull.ts / status.ts   # sync surface, all built on core/reconcile
-│ ├ import.ts             # bulk import of existing gists
+│ ├ actions.ts            #   hidden `__open` / `__copy` / `__list`: id/URL resolution behind binds
+│ ├ grep.ts               # line-level regex search (self-reload like search)
+│ ├ publish.ts / unpublish.ts    # per-gist maintenance, id/URL-addressed
+│ ├ push.ts / pull.ts / status.ts  # bulk sync surface, all built on core/reconcile
+│ ├ import.ts             # bulk import of existing gists into gists/<gist-id>/
 │ ├ star.ts               # star mirror: sync / add
 │ ├ root.ts               # repo git helpers: init / path / commit / push / pull / status
 │ ├ init.ts               # implementation behind `root init` (repo scaffold + config)
 │ └ test_helpers.ts
 ├ core/
-│ ├ reconcile.ts          # THE drift engine — status/pull/publish must all judge through here
-│ ├ state.ts              # index v2 (.gistan/state.json) load/save, v1 detection
-│ ├ snippets.ts           # gists/ scanning (bare files / nesting), content hash, .description.txt
+│ ├ reconcile.ts          # THE drift engine — status/push/pull/publish must all judge through here
+│ ├ state.ts              # index v3 (.gistan/state.json) load/save, v1/v2 detection
+│ ├ ids.ts                # local id generation + id/URL target normalization
+│ ├ display.ts            # id-hiding display paths + description lookup for search/list
+│ ├ sync.ts               # publish/pull building blocks (diff payload, apply-remote)
+│ ├ snippets.ts           # gists/ scanning (bare files / nesting), content hashes
 │ ├ stars.ts              # stars/ mirror writes + .gistan/cache/stars.json
 │ ├ gh.ts                 # all GitHub API access, as `gh api` subprocess wrappers
 │ ├ config.ts             # ~/.config/gistan/config.toml
 │ ├ deps.ts               # external CLI presence checks (gh/git/rg/fzf)
 │ ├ clipboard.ts          # cross-platform copy (pbcopy / clip / wl-copy → xclip → xsel)
-│ ├ proc.ts               # Runner abstraction over subprocesses (swapped out in tests)
-│ └ description.ts        # slugify for import dirnames
+│ └ proc.ts               # Runner abstraction over subprocesses (swapped out in tests)
 └ testing.ts              # in-memory CommandContext for unit tests
 scripts/release.ts        # release:prepare / release:publish (publish is human-only)
 docs/                     # ADR (decisions) / SPEC (current behavior) / TASK (work logs)
 ```
 
 ### Test dev binary
+
 ```sh
 mise exec -- deno task compile
 ./gistan --version
@@ -199,9 +220,9 @@ mise run release:prepare -- 0.1.0
 mise run release:publish -- 0.1.0 --i-understand-this-pushes-and-publishes
 ```
 
-`release:publish` refuses to run unless the working tree is clean, the tag exists, the tag points
-at HEAD, and the tag matches `VERSION` in `src/main.ts` — so the published binaries are always
-built from the exact commit the tag points at.
+`release:publish` refuses to run unless the working tree is clean, the tag exists, the tag points at
+HEAD, and the tag matches `VERSION` in `src/main.ts` — so the published binaries are always built
+from the exact commit the tag points at.
 
 New machine checklist: clone this repo → `mise install` → build & copy the binary → clone your notes
 repo yourself → `gistan root init <notes-repo-dir>`.

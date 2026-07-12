@@ -1,26 +1,36 @@
 import { assert, assertEquals } from "@std/assert";
+import type { Runner } from "../core/proc.ts";
 import { contentHash } from "../core/snippets.ts";
 import { loadState, saveState } from "../core/state.ts";
-import { AT, fixture, join, memoryContext } from "./test_helpers.ts";
+import { AT, AT2, fixture, join, memoryContext } from "./test_helpers.ts";
 import { run } from "./status.ts";
 
-async function published() {
+async function published(description = "") {
   const f = await fixture();
   await Deno.mkdir(join(f.repo, "gists", "one"), { recursive: true });
   await Deno.writeTextFile(join(f.repo, "gists", "one", "a.md"), "A");
   await saveState(f.repo, {
-    version: 2,
+    version: 3,
     gists: {
       one: {
-        id: "gid",
         visibility: "public",
+        description,
         remote_updated_at: AT,
-        synced_description_hash: null,
         files: { "a.md": await contentHash(new TextEncoder().encode("A")) },
       },
     },
+    locals: {},
   });
   return f;
+}
+
+async function assertMissing(path: string) {
+  try {
+    await Deno.stat(path);
+    throw new Error(`expected missing: ${path}`);
+  } catch (e) {
+    if (!(e instanceof Deno.errors.NotFound)) throw e;
+  }
 }
 
 Deno.test("status default does not call gh", async () => {
@@ -49,7 +59,7 @@ Deno.test("status --remote reports remote drift", async () => {
   const { home } = await published();
   const io = memoryContext((cmd, args) => {
     if (cmd === "gh" && args[1] === "gists?per_page=100") {
-      return Promise.resolve({ code: 0, stdout: "gid\tT2\ttrue\n", stderr: "" });
+      return Promise.resolve({ code: 0, stdout: `one\t${AT2}\ttrue\n`, stderr: "" });
     }
     return Promise.resolve({ code: 0, stdout: "", stderr: "" });
   }, home);
@@ -57,16 +67,20 @@ Deno.test("status --remote reports remote drift", async () => {
   assert(io.stdout.includes("remote-drift"));
 });
 
-Deno.test("status --fix can unlink remote-deleted", async () => {
-  const { home, repo } = await published();
+Deno.test("status appends the description and gist url on formatted lines", async () => {
+  const { home } = await published("My notes");
+  const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home);
+  assertEquals(await run({ name: "status", args: ["--all"] }, io.context), 0);
+  assert(io.stdout.includes("— My notes"));
+  assert(io.stdout.includes("https://gist.github.com/one"));
+});
+
+Deno.test("status --fix unlinks a remote-deleted gist, renaming the dir to a fresh local id and keeping its description", async () => {
+  const { home, repo } = await published("Keep me");
   const io = memoryContext(
     (cmd, args) => {
       if (cmd === "gh" && args[1] === "gists?per_page=100") {
-        return Promise.resolve({
-          code: 0,
-          stdout: "",
-          stderr: "",
-        });
+        return Promise.resolve({ code: 0, stdout: "", stderr: "" });
       }
       return Promise.resolve({ code: 0, stdout: "", stderr: "" });
     },
@@ -74,25 +88,32 @@ Deno.test("status --fix can unlink remote-deleted", async () => {
     { confirmAnswer: true },
   );
   assertEquals(await run({ name: "status", args: ["--fix"] }, io.context), 0);
-  assertEquals((await loadState(repo)).gists.one, undefined);
+  const state = await loadState(repo);
+  assertEquals(state.gists.one, undefined);
+  await assertMissing(join(repo, "gists", "one"));
+  const newIds = Object.keys(state.locals);
+  assertEquals(newIds.length, 1);
+  assert(newIds[0].startsWith("_"));
+  assertEquals(state.locals[newIds[0]].description, "Keep me");
+  assert(io.stdout.includes(`moved: gists/one -> gists/${newIds[0]}`));
 });
 
-Deno.test("status --fix restores missing local dir from remote", async () => {
+Deno.test("status --fix restores a missing local dir from remote", async () => {
   const { home, repo } = await published();
   await Deno.remove(join(repo, "gists", "one"), { recursive: true });
   const io = memoryContext(
     (cmd, args) => {
       if (cmd === "gh" && args[1] === "gists?per_page=100") {
-        return Promise.resolve({
-          code: 0,
-          stdout: `gid\t${AT}\ttrue\n`,
-          stderr: "",
-        });
+        return Promise.resolve({ code: 0, stdout: `one\t${AT}\ttrue\n`, stderr: "" });
       }
-      if (cmd === "gh" && args[1] === "gists/gid") {
+      if (cmd === "gh" && args[1] === "gists/one") {
         return Promise.resolve({
           code: 0,
-          stdout: JSON.stringify({ files: { "a.md": { filename: "a.md", content: "A" } } }),
+          stdout: JSON.stringify({
+            description: "",
+            updated_at: AT,
+            files: { "a.md": { filename: "a.md", content: "A" } },
+          }),
           stderr: "",
         });
       }
@@ -105,7 +126,7 @@ Deno.test("status --fix restores missing local dir from remote", async () => {
   assertEquals(await Deno.readTextFile(join(repo, "gists", "one", "a.md")), "A");
 });
 
-Deno.test("status --fix can delete orphan gist when restore declined", async () => {
+Deno.test("status --fix can delete an orphan gist when restore is declined", async () => {
   const { home, repo } = await published();
   await Deno.remove(join(repo, "gists", "one"), { recursive: true });
   const calls: string[] = [];
@@ -113,11 +134,7 @@ Deno.test("status --fix can delete orphan gist when restore declined", async () 
     (cmd, args) => {
       calls.push(args.join(" "));
       if (cmd === "gh" && args[1] === "gists?per_page=100") {
-        return Promise.resolve({
-          code: 0,
-          stdout: `gid\t${AT}\ttrue\n`,
-          stderr: "",
-        });
+        return Promise.resolve({ code: 0, stdout: `one\t${AT}\ttrue\n`, stderr: "" });
       }
       return Promise.resolve({ code: 0, stdout: "", stderr: "" });
     },
@@ -127,6 +144,130 @@ Deno.test("status --fix can delete orphan gist when restore declined", async () 
   assertEquals(await run({ name: "status", args: ["--fix"] }, io.context), 0);
   assert(calls.some((c) => c.includes("DELETE")));
   assertEquals((await loadState(repo)).gists.one, undefined);
+});
+
+Deno.test("status --fix resolves a conflict by showing per-file sides, then pulling on the first confirm", async () => {
+  const { home, repo } = await published();
+  await Deno.writeTextFile(join(repo, "gists", "one", "a.md"), "local-changed");
+  const io = memoryContext(
+    (cmd, args) => {
+      if (cmd === "gh" && args[1] === "gists?per_page=100") {
+        return Promise.resolve({ code: 0, stdout: `one\t${AT2}\ttrue\n`, stderr: "" });
+      }
+      if (cmd === "gh" && args[1] === "gists/one") {
+        return Promise.resolve({
+          code: 0,
+          stdout: JSON.stringify({
+            description: "",
+            updated_at: AT2,
+            files: { "a.md": { filename: "a.md", content: "remote-changed" } },
+          }),
+          stderr: "",
+        });
+      }
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    },
+    home,
+    { confirmAnswer: true },
+  );
+  assertEquals(await run({ name: "status", args: ["--fix"] }, io.context), 0);
+  assert(io.stdout.includes("both   a.md"));
+  assertEquals(await Deno.readTextFile(join(repo, "gists", "one", "a.md")), "remote-changed");
+});
+
+Deno.test("status --fix conflict declines pull and pushes local on the second confirm", async () => {
+  const { home, repo } = await published();
+  await Deno.writeTextFile(join(repo, "gists", "one", "a.md"), "local-changed");
+  let body = "";
+  const io = memoryContext(
+    (cmd, args, opt) => {
+      if (cmd === "gh" && args[1] === "gists?per_page=100") {
+        return Promise.resolve({ code: 0, stdout: `one\t${AT2}\ttrue\n`, stderr: "" });
+      }
+      if (cmd === "gh" && args[1] === "gists/one" && args.includes("PATCH")) {
+        body = String(opt?.stdin);
+        return Promise.resolve({ code: 0, stdout: AT2, stderr: "" });
+      }
+      if (cmd === "gh" && args[1] === "gists/one") {
+        return Promise.resolve({
+          code: 0,
+          stdout: JSON.stringify({
+            description: "",
+            updated_at: AT2,
+            files: { "a.md": { filename: "a.md", content: "remote-changed" } },
+          }),
+          stderr: "",
+        });
+      }
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    },
+    home,
+    { confirmAnswer: [false, true] },
+  );
+  assertEquals(await run({ name: "status", args: ["--fix"] }, io.context), 0);
+  assertEquals(await Deno.readTextFile(join(repo, "gists", "one", "a.md")), "local-changed");
+  assert("a.md" in JSON.parse(body).files);
+});
+
+Deno.test("status --fix conflict declining both sides leaves the gist as-is", async () => {
+  const { home, repo } = await published();
+  await Deno.writeTextFile(join(repo, "gists", "one", "a.md"), "local-changed");
+  const io = memoryContext(
+    (cmd, args) => {
+      if (cmd === "gh" && args[1] === "gists?per_page=100") {
+        return Promise.resolve({ code: 0, stdout: `one\t${AT2}\ttrue\n`, stderr: "" });
+      }
+      if (cmd === "gh" && args[1] === "gists/one") {
+        return Promise.resolve({
+          code: 0,
+          stdout: JSON.stringify({
+            description: "",
+            updated_at: AT2,
+            files: { "a.md": { filename: "a.md", content: "remote-changed" } },
+          }),
+          stderr: "",
+        });
+      }
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+    },
+    home,
+    { confirmAnswer: [false, false] },
+  );
+  assertEquals(await run({ name: "status", args: ["--fix"] }, io.context), 0);
+  assertEquals(await Deno.readTextFile(join(repo, "gists", "one", "a.md")), "local-changed");
+  assertEquals((await loadState(repo)).gists.one.remote_updated_at, AT);
+  assert(io.stdout.includes("1 left as-is"));
+});
+
+Deno.test("status --fix hints local-drift toward gistan push", async () => {
+  const { home, repo } = await published();
+  await Deno.writeTextFile(join(repo, "gists", "one", "a.md"), "changed");
+  const io = memoryContext((cmd, args) => {
+    if (cmd === "gh" && args[1] === "gists?per_page=100") {
+      return Promise.resolve({ code: 0, stdout: `one\t${AT}\ttrue\n`, stderr: "" });
+    }
+    return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+  }, home);
+  assertEquals(await run({ name: "status", args: ["--fix"] }, io.context), 0);
+  assert(io.stderr.includes("gistan push"));
+});
+
+Deno.test("status --fix hints remote-drift toward gistan pull", async () => {
+  const { home } = await published();
+  const io = memoryContext((cmd, args) => {
+    if (cmd === "gh" && args[1] === "gists?per_page=100") {
+      return Promise.resolve({ code: 0, stdout: `one\t${AT2}\ttrue\n`, stderr: "" });
+    }
+    return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+  }, home);
+  assertEquals(await run({ name: "status", args: ["--fix"] }, io.context), 0);
+  assert(io.stderr.includes("gistan pull"));
+});
+
+Deno.test("status --fix returns an error when the remote listing fails", async () => {
+  const { home } = await published();
+  const io = memoryContext(() => Promise.resolve({ code: 1, stdout: "", stderr: "bad" }), home);
+  assertEquals(await run({ name: "status", args: ["--fix"] }, io.context), 1);
 });
 
 Deno.test("status filter limits output to one dir", async () => {
@@ -166,7 +307,7 @@ Deno.test("status --remote also hides a genuinely in-sync gist by default, --all
   const { home } = await published();
   const inSyncRunner = (cmd: string, args: readonly string[]) => {
     if (cmd === "gh" && args[1] === "gists?per_page=100") {
-      return Promise.resolve({ code: 0, stdout: `gid\t${AT}\ttrue\n`, stderr: "" });
+      return Promise.resolve({ code: 0, stdout: `one\t${AT}\ttrue\n`, stderr: "" });
     }
     return Promise.resolve({ code: 0, stdout: "", stderr: "" });
   };
@@ -200,4 +341,27 @@ Deno.test("a dirname filter that matches nothing is a lookup error, not an empty
   assertEquals(await run({ name: "status", args: ["nope"] }, io.context), 1);
   assert(io.stderr.includes("nope not found"));
   assert(!io.stdout.includes("no gists yet"));
+});
+
+Deno.test("status --fix forgets a dir-missing entry when the gist is gone upstream, without a delete call", async () => {
+  const { home, repo } = await fixture();
+  await saveState(repo, {
+    version: 3,
+    gists: {
+      gone: { visibility: "secret", description: "", remote_updated_at: AT, files: {} },
+    },
+    locals: {},
+  });
+  const deletes: string[] = [];
+  const r: Runner = (cmd, args) => {
+    if (cmd === "gh" && args.includes("DELETE")) deletes.push(String(args[1]));
+    // Empty gh list: the gist no longer exists upstream.
+    return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+  };
+  const io = memoryContext(r, home, { confirmAnswer: true });
+  assertEquals(await run({ name: "status", args: ["--fix"] }, io.context), 0);
+  assert(io.confirms.some((m) => m.includes("Forget index entry?")));
+  assertEquals(deletes, []);
+  assertEquals((await loadState(repo)).gists.gone, undefined);
+  assert(io.stdout.includes("1 fixed"));
 });

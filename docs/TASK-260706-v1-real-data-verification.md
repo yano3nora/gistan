@@ -1,17 +1,16 @@
 # TASK-260706: v1 実データ検証 (人間実行)
 
-260706 v1 実データ検証
-===
+# 260706 v1 実データ検証
 
-> **Status: クローズ (2026-07-12)**。手順の前提 (gitleaks 必須 / `snippets/` / tags / `gistan init`) は
-> [ADR-0002](./ADR-0002-one-directory-one-gist.md) 以降の再設計で消滅。実データでの運用検証自体は
+> **Status: クローズ (2026-07-12)**。手順の前提 (gitleaks 必須 / `snippets/` / tags / `gistan init`)
+> は [ADR-0002](./ADR-0002-one-directory-one-gist.md) 以降の再設計で消滅。実データでの運用検証自体は
 > v0.2〜v0.5 の実機フィードバックループで完了した。
 
 ## asis
 
-v1 + v2 のコマンドは unit test と部分的な実環境 smoke まで完了しているが、
-「実アカウントの約 753 gists を相手にした一連の運用」は未検証。
-gist の作成・削除は外部公開操作のため Agent は実行せず、人間が行う。
+v1 + v2 のコマンドは unit test と部分的な実環境 smoke まで完了しているが、 「実アカウントの約 753
+gists を相手にした一連の運用」は未検証。 gist の作成・削除は外部公開操作のため Agent
+は実行せず、人間が行う。
 
 ## tobe
 

@@ -9,6 +9,7 @@ export type CommandName =
   | "rm"
   | "publish"
   | "unpublish"
+  | "push"
   | "pull"
   | "status"
   | "import"

@@ -35,49 +35,49 @@ SPEC-0001 (改訂済) と ADR-0003 を正とする。要点:
 
 実装順は依存関係順。各 phase 完了ごとに `deno task check` / `deno task test` を通すこと。
 
-- [ ] **P1 core: index v3 + local-id**
-  - [ ] `src/core/state.ts`: v3 schema (`gists` key = gist-id / `locals` セクション)。v1 / v2
+- [x] **P1 core: index v3 + local-id**
+  - [x] `src/core/state.ts`: v3 schema (`gists` key = gist-id / `locals` セクション)。v1 / v2
         検出時は再 import 案内で停止
-  - [ ] local-id 採番 (`_` + 衝突しないランダム英数字)。既存 dir との衝突チェック
-  - [ ] `src/core/description.ts`: `slugify` 削除。description の読み書きを index 経由に変更
+  - [x] local-id 採番 (`_` + 衝突しないランダム英数字)。既存 dir との衝突チェック
+  - [x] `src/core/description.ts`: `slugify` 削除。description の読み書きを index 経由に変更
         (`.description.txt` の read / write / hash を全廃)
-- [ ] **P2 core: reconcile 簡素化**
-  - [ ] description の local drift 判定 (`synced_description_hash`) を削除。remote description !=
+- [x] **P2 core: reconcile 簡素化**
+  - [x] description の local drift 判定 (`synced_description_hash`) を削除。remote description !=
         index description は remote-drift として報告
-- [ ] **P3 commands: new / publish / unpublish**
-  - [ ] `new`: local-id 採番して dir 作成。`--id` / `--publish [--public]` / `-d` (index
+- [x] **P3 commands: new / publish / unpublish**
+  - [x] `new`: local-id 採番して dir 作成。`--id` / `--publish [--public]` / `-d` (index
         保存)。`dir/file.md` 形式は拒否。終了時に path + id (URL) を表示
-  - [ ] `publish`: id / URL 指定のみに変更 (query 廃止)。確認プロンプトに filename 一覧 + 軽い
+  - [x] `publish`: id / URL 指定のみに変更 (query 廃止)。確認プロンプトに filename 一覧 + 軽い
         preview。新規作成成功時に dir rename。`-d` で description 更新
-  - [ ] `unpublish`: id / URL 指定のみ。削除後に新 local-id へ rename、description を `locals`
+  - [x] `unpublish`: id / URL 指定のみ。削除後に新 local-id へ rename、description を `locals`
         へ引き継ぐ
-- [ ] **P4 commands: push / pull / status**
-  - [ ] `push` 新設: published の local-drift 全列挙 → 確認 → 一括 publish。conflict skip + status
+- [x] **P4 commands: push / pull / status**
+  - [x] `push` 新設: published の local-drift 全列挙 → 確認 → 一括 publish。conflict skip + status
         誘導。未 publish dir は対象外
-  - [ ] `pull` 置換: remote-drift 全列挙 → 確認 → 一括取り込み。conflict / remote-deleted skip +
+  - [x] `pull` 置換: remote-drift 全列挙 → 確認 → 一括取り込み。conflict / remote-deleted skip +
         status 誘導。旧 `pull [dirname]` 廃止
-  - [ ] `status`: dirname 引数 → id 引数へ。`--fix` に conflict の diff 提示 + 選択を担わせる (push
+  - [x] `status`: dirname 引数 → id 引数へ。`--fix` に conflict の diff 提示 + 選択を担わせる (push
         / pull が skip した項目の受け皿)
-  - [ ] help / エラーメッセージで gist の push / pull と `root push` / `root pull` を相互案内
-- [ ] **P5 commands: search / grep / list 表示**
-  - [ ] display path から id segment を除去 (gists / stars 両方)。display → 実 path の対応を
+  - [x] help / エラーメッセージで gist の push / pull と `root push` / `root pull` を相互案内
+- [x] **P5 commands: search / grep / list 表示**
+  - [x] display path から id segment を除去 (gists / stars 両方)。display → 実 path の対応を
         renderer 内部で保持 (fzf 行から実 path を引けるように。delimiter か hidden field を検討)
-  - [ ] description をマッチ対象 + 行末 dim 補助表示に追加 (index / stars cache
+  - [x] description をマッチ対象 + 行末 dim 補助表示に追加 (index / stars cache
         から引く)。段構成は「path or description ヒット群 → 本文のみ群」
-  - [ ] ctrl-y bind: published / star は gist URL、未 publish は local-id を clipboard へ
+  - [x] ctrl-y bind: published / star は gist URL、未 publish は local-id を clipboard へ
         (`src/core/clipboard.ts` 再利用)
-  - [ ] ctrl-o の gist-id 解決を display path 依存から実 path 依存へ変更
-  - [ ] `list` も同じ display path + description 表示に統一
-- [ ] **P6 commands: import**
-  - [ ] `gists/<gist-id>/` へ直接取り込み。description は index へ。`.description.txt` 生成と予約名
+  - [x] ctrl-o の gist-id 解決を display path 依存から実 path 依存へ変更
+  - [x] `list` も同じ display path + description 表示に統一
+- [x] **P6 commands: import**
+  - [x] `gists/<gist-id>/` へ直接取り込み。description は index へ。`.description.txt` 生成と予約名
         warn を削除
-- [ ] **P7 docs**
-  - [ ] README: 「gists/ 配下の 1 directory = 1 gist (dirname =
+- [x] **P7 docs**
+  - [x] README: 「gists/ 配下の 1 directory = 1 gist (dirname =
         gist-id、ツール管理領域)」を明示。push / pull 中心の日常フロー、fresh re-import
         の移行手順を記載
-  - [ ] AGENTS.md の Critical Architecture / Domains を ADR-0003 に合わせて更新 (`.description.txt`
+  - [x] AGENTS.md の Critical Architecture / Domains を ADR-0003 に合わせて更新 (`.description.txt`
         記述の削除など)
-  - [ ] SPEC-0001 冒頭の「TASK-260712 で実装中」注記を削除
+  - [x] SPEC-0001 冒頭の「TASK-260712 で実装中」注記を削除
 
 ## testcases
 
@@ -113,3 +113,39 @@ SPEC-0001 (改訂済) と ADR-0003 を正とする。要点:
   に響く場合は、マッチ対象から外して表示のみに縮退してよい (ADR-0003 Open Questions)
 - P1〜P3 / P6 は完了条件が明確で下位モデルへ委譲可。P4 (対話フロー設計) と P5 (fzf 連携)
   は実装しながらの判断が要るため上位モデル推奨
+
+### 実装記録 (2026-07-12)
+
+- 全 phase 実装完了。`deno task check` / `deno task test` (302 tests) green
+- fzf 連携は「3 フィールド行プロトコル」で解決: renderer が `実path TAB 行番号 TAB 表示内容` を
+  出力し `--delimiter TAB` + `--with-nth 3..` で表示だけ id を隠す。`{1}` = 実 path が preview /
+  Enter / ctrl-o / ctrl-y / ctrl-v すべての入力になる。旧 `writeGistMapFile` + awk lookup は廃止し、
+  id 解決は隠しコマンド `__open` / `__copy` (TypeScript, cwd = repo で index を読む) へ移動
+- grep も同じ理由で sh パイプラインを廃止し `__grep-render` (TypeScript) 化。regex 判定は従来通り rg
+  subprocess に委ね、path ヒット判定は display path リストを rg へ stdin で流す方式
+- edit / rm の fzf picker (`pickFile`) も `__list` renderer で同じ id 秘匿表示に統一 (SPEC 外の
+  ついで対応。description が fzf native match の対象になる副次効果あり)
+- 上記 testcases は unit テストで同等シナリオを網羅済み。実 gist / 実 fzf セッションでの動作確認
+  (実機フィードバック) は未実施 — 次のアクション
+
+### codex レビュー対応 (2026-07-12)
+
+codex exec による change set レビューで 7 件の指摘。5 件を修正、2 件は判断の上で見送り:
+
+- **修正 (P0)** truncated file を含む gist の pull がローカル file を削除して同期済みにしていた
+  (旧実装から移植した潜在バグ) → `applyRemote` を all-or-nothing 化し、pull / `--fix` で skip + 手動
+  取得案内
+- **修正 (P0)** publish の可視性変更が delete → create の順で、create 失敗時に旧 gist だけ消えた →
+  create → local 切替 → delete に逆転。削除失敗は「重複が残る」warn で終了
+- **修正 (P1)** publish / unpublish の remote 操作成功後に rename / index 保存が失敗すると成功表示の
+  まま不整合が残った → finalize を try に入れ、成功表示は保存後、失敗時は復旧手順を明示
+- **修正 (P1)** `status --fix` が全修復を最後に一括保存しており、途中例外で先行修復が index
+  未反映になった → per-item 保存 + per-item try/catch。また「dir 無し + remote 無し」(unpublish
+  途中失敗の残骸) を deleteGist なしの index unlink で修復できるように
+- **修正 (P2)** tab を含む filename が fzf 行プロトコルを壊す → `new` で制御文字拒否 + renderer 側で
+  tab 入り path を除外
+- **見送り** rg exit 2 (invalid regex 等) を「結果なし」に見せる件 → キー入力途中の不完全 regex が
+  毎キーストローク発生する grep の性質上、旧 sh パイプライン (`|| true`) から一貫した意図的挙動。
+  検索漏れの告知手段 (fzf header 等) は将来の改善候補
+- **見送り** filename 内 tab の完全なエスケープ機構 → 上記の拒否 + 除外で実害を塞ぎ、プロトコルの
+  複雑化はしない
