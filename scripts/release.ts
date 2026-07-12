@@ -1,52 +1,13 @@
-import { join } from "@std/path";
+// Release flow の薄い wrapper。compile / archive / checksum / GitHub Release 作成は
+// goreleaser (.goreleaser.yaml) に任せ、ここには goreleaser に寄せられないものだけを残す:
+// version bump・check/test・tag と VERSION の整合チェック・人間による publish ゲート。
+//
+// Flow:
+//   1. prepare : bump + check/test + `goreleaser release --snapshot` (publish なしの全工程ドライラン)
+//   2. 人間    : version bump を commit し、`git tag v<version>` を打つ
+//   3. publish : 整合チェック → commit + tag を push → `goreleaser release` (tag 済みコミットから再ビルド)
 
 type CommandName = "prepare" | "publish";
-
-interface Target {
-  readonly denoTarget: string;
-  readonly os: "linux" | "macos" | "windows";
-  readonly arch: "x64" | "arm64";
-  readonly archive: "tar.gz" | "zip";
-  readonly binary: "gistan" | "gistan.exe";
-}
-
-const TARGETS: readonly Target[] = [
-  {
-    denoTarget: "x86_64-unknown-linux-gnu",
-    os: "linux",
-    arch: "x64",
-    archive: "tar.gz",
-    binary: "gistan",
-  },
-  {
-    denoTarget: "aarch64-unknown-linux-gnu",
-    os: "linux",
-    arch: "arm64",
-    archive: "tar.gz",
-    binary: "gistan",
-  },
-  {
-    denoTarget: "x86_64-apple-darwin",
-    os: "macos",
-    arch: "x64",
-    archive: "tar.gz",
-    binary: "gistan",
-  },
-  {
-    denoTarget: "aarch64-apple-darwin",
-    os: "macos",
-    arch: "arm64",
-    archive: "tar.gz",
-    binary: "gistan",
-  },
-  {
-    denoTarget: "x86_64-pc-windows-msvc",
-    os: "windows",
-    arch: "x64",
-    archive: "zip",
-    binary: "gistan.exe",
-  },
-];
 
 const PUBLISH_FLAG = "--i-understand-this-pushes-and-publishes";
 
@@ -80,24 +41,45 @@ function parseArgs(): { command: CommandName; version: string; publishAllowed: b
   };
 }
 
-async function run(command: string, args: readonly string[], cwd = Deno.cwd()): Promise<string> {
-  console.log(`$ ${[command, ...args].join(" ")}`);
+interface RunOptions {
+  readonly cwd?: string;
+  readonly env?: Record<string, string>;
+  // quiet: コマンドと stdout を表示しない。token など秘匿値を扱うコマンド用
+  readonly quiet?: boolean;
+  // stream: 出力を端末へ直接流す (戻り値は空文字)。goreleaser 等の長時間コマンド用
+  readonly stream?: boolean;
+}
+
+async function run(
+  command: string,
+  args: readonly string[],
+  options: RunOptions = {},
+): Promise<string> {
+  if (!options.quiet) {
+    console.log(`$ ${[command, ...args].join(" ")}`);
+  }
 
   const child = new Deno.Command(command, {
     args: [...args],
-    cwd,
-    stdout: "piped",
-    stderr: "piped",
+    cwd: options.cwd ?? Deno.cwd(),
+    env: options.env,
+    stdout: options.stream ? "inherit" : "piped",
+    stderr: options.stream ? "inherit" : "piped",
   });
   const result = await child.output();
-  const stdout = new TextDecoder().decode(result.stdout);
-  const stderr = new TextDecoder().decode(result.stderr);
+  let stdout = "";
 
-  if (stdout.trim() !== "") {
-    console.log(stdout.trimEnd());
-  }
-  if (stderr.trim() !== "") {
-    console.error(stderr.trimEnd());
+  if (!options.stream) {
+    stdout = new TextDecoder().decode(result.stdout);
+    const stderr = new TextDecoder().decode(result.stderr);
+
+    // quiet でも失敗時の stderr は出す。stdout は秘匿値の可能性があるため出さない
+    if (!options.quiet && stdout.trim() !== "") {
+      console.log(stdout.trimEnd());
+    }
+    if (stderr.trim() !== "" && (!options.quiet || !result.success)) {
+      console.error(stderr.trimEnd());
+    }
   }
   if (!result.success) {
     throw new Error(`Command failed: ${command} ${args.join(" ")}`);
@@ -125,6 +107,8 @@ async function bumpVersion(version: string): Promise<void> {
   await Deno.writeTextFile(path, next);
 }
 
+// deno compile は Go の ldflags のような version 注入ができないため VERSION は手動 bump。
+// tag と VERSION の食い違いを publish 前に止める最後の網がこのチェック
 async function assertCliVersion(version: string): Promise<void> {
   const stdout = await run("deno", [
     "run",
@@ -141,38 +125,6 @@ async function assertCliVersion(version: string): Promise<void> {
   }
 }
 
-async function packageTarget(version: string, target: Target, releaseDir: string): Promise<void> {
-  const workDir = join(releaseDir, `${target.os}-${target.arch}`);
-  await Deno.mkdir(workDir, { recursive: true });
-
-  // Compile each target into its own work directory so archive roots stay clean.
-  await run("deno", [
-    "compile",
-    "--allow-env",
-    "--allow-read",
-    "--allow-write",
-    "--allow-run",
-    "--target",
-    target.denoTarget,
-    "--output",
-    join(workDir, target.binary),
-    "src/main.ts",
-  ]);
-
-  const asset = `gistan-v${version}-${target.os}-${target.arch}.${target.archive}`;
-  const assetPath = join(releaseDir, asset);
-
-  if (target.archive === "zip") {
-    await run("zip", ["-j", assetPath, join(workDir, target.binary)]);
-  } else {
-    // `-C workDir binary` prevents leaking temporary directories into the archive.
-    await run("tar", ["-czf", assetPath, "-C", workDir, target.binary]);
-  }
-
-  const checksum = await run("shasum", ["-a", "256", asset], releaseDir);
-  await Deno.writeTextFile(`${assetPath}.sha256`, checksum);
-}
-
 async function assertCleanTree(): Promise<void> {
   const stdout = await run("git", ["status", "--porcelain"]);
   if (stdout.trim() !== "") {
@@ -180,29 +132,40 @@ async function assertCleanTree(): Promise<void> {
   }
 }
 
-async function prepare(version: string): Promise<void> {
-  const releaseDir = join("dist", `gistan-v${version}`);
-
-  await bumpVersion(version);
-  await assertCliVersion(version);
-  await run("deno", ["task", "check"]);
-  await run("deno", ["task", "test"]);
-
-  // Recreate the release directory so stale assets from a previous version/target
-  // cannot be accidentally uploaded.
-  await Deno.remove(releaseDir, { recursive: true }).catch((error) => {
-    if (!(error instanceof Deno.errors.NotFound)) {
-      throw error;
-    }
-  });
-  await Deno.mkdir(releaseDir, { recursive: true });
-
-  for (const target of TARGETS) {
-    await packageTarget(version, target, releaseDir);
+// goreleaser は tag 済みコミットからビルドする前提のため、tag が HEAD を指すことを保証する
+async function assertTagAtHead(tag: string): Promise<void> {
+  let tagCommit: string;
+  try {
+    tagCommit = (await run("git", ["rev-parse", "--verify", `${tag}^{commit}`], { quiet: true }))
+      .trim();
+  } catch {
+    throw new Error(`Tag ${tag} does not exist. Create it yourself first: git tag ${tag}`);
   }
 
-  console.log(`\nRelease assets are ready in ${releaseDir}`);
-  console.log("Review the version bump, commit it, then run release:publish.");
+  const head = (await run("git", ["rev-parse", "HEAD"], { quiet: true })).trim();
+  if (tagCommit !== head) {
+    throw new Error(
+      `Tag ${tag} does not point at HEAD. Move the tag to the release commit or check out the tagged commit.`,
+    );
+  }
+}
+
+async function prepare(version: string): Promise<void> {
+  await bumpVersion(version);
+  await assertCliVersion(version);
+  await run("deno", ["task", "check"], { stream: true });
+  await run("deno", ["task", "test"], { stream: true });
+
+  // publish で失敗しうるビルド〜archive〜checksum をここで全部失敗させておく。
+  // --snapshot は tag 不要・publish なしで全工程を回すドライラン
+  await run("goreleaser", ["release", "--snapshot", "--clean"], { stream: true });
+
+  console.log(
+    "\nSnapshot assets are ready in dist/ (validation only; publish rebuilds from the tag).",
+  );
+  console.log(
+    `Review the diff, commit the bump, tag it (git tag v${version}), then run release:publish.`,
+  );
 }
 
 async function publish(version: string, publishAllowed: boolean): Promise<void> {
@@ -213,34 +176,26 @@ async function publish(version: string, publishAllowed: boolean): Promise<void> 
   }
 
   const tag = `v${version}`;
-  const actualReleaseDir = join("dist", `gistan-v${version}`);
 
-  // Keep this check simple and explicit: publishing should happen only after
-  // prepare has produced versioned assets in the expected directory.
   await assertCliVersion(version);
   await assertCleanTree();
-  await Deno.stat(actualReleaseDir);
-  await run("git", ["tag", tag]);
-  await run("git", ["push", "origin", tag]);
-  await run("gh", [
-    "release",
-    "create",
-    tag,
-    `${actualReleaseDir}/gistan-v${version}-linux-x64.tar.gz`,
-    `${actualReleaseDir}/gistan-v${version}-linux-x64.tar.gz.sha256`,
-    `${actualReleaseDir}/gistan-v${version}-linux-arm64.tar.gz`,
-    `${actualReleaseDir}/gistan-v${version}-linux-arm64.tar.gz.sha256`,
-    `${actualReleaseDir}/gistan-v${version}-macos-x64.tar.gz`,
-    `${actualReleaseDir}/gistan-v${version}-macos-x64.tar.gz.sha256`,
-    `${actualReleaseDir}/gistan-v${version}-macos-arm64.tar.gz`,
-    `${actualReleaseDir}/gistan-v${version}-macos-arm64.tar.gz.sha256`,
-    `${actualReleaseDir}/gistan-v${version}-windows-x64.zip`,
-    `${actualReleaseDir}/gistan-v${version}-windows-x64.zip.sha256`,
-    "--generate-notes",
-    "--verify-tag",
-  ]);
+  await assertTagAtHead(tag);
 
-  console.log(`Published ${tag} from ${actualReleaseDir}.`);
+  // goreleaser は push を行わず GitHub API しか叩かないため、
+  // Release が正しいコミットを指すように commit と tag を先に remote へ揃える
+  await run("git", ["push", "origin", "HEAD"]);
+  await run("git", ["push", "origin", tag]);
+
+  // goreleaser は GITHUB_TOKEN を要求する。gh の認証を使い回して token 管理を増やさない
+  const token = Deno.env.get("GITHUB_TOKEN") ??
+    (await run("gh", ["auth", "token"], { quiet: true })).trim();
+
+  await run("goreleaser", ["release", "--clean"], {
+    env: { GITHUB_TOKEN: token },
+    stream: true,
+  });
+
+  console.log(`Published ${tag}.`);
 }
 
 if (import.meta.main) {

@@ -23,11 +23,8 @@ is skipped on import.
 ### Install with mise
 
 ```sh
-# Latest release.
-mise use -g github:yano3nora/gistan
-
-# Pinned release.
-mise use -g github:yano3nora/gistan@0.1.0
+# e.g. use globally.
+mise use -g github:yano3nora/gistan@0
 
 gistan --version
 ```
@@ -180,21 +177,31 @@ gistan ships as a single self-contained binary (`deno compile` embeds the runtim
 on the target machine needs Deno, but runtime integrations still require external CLIs: `gh`
 (authenticated, gist scope), `git`, and `rg` + `fzf` (search/edit/rm picks).
 
+Compile / archive / checksum / GitHub Release creation are delegated to
+[goreleaser](https://goreleaser.com/) (`.goreleaser.yaml`). `scripts/release.ts` stays as a thin
+wrapper for what goreleaser cannot own: the VERSION bump, check/test, tag↔VERSION consistency
+checks, and the human-only publish gate.
+
 ```sh
-# 1. Bump VERSION, run check/test, and build all release assets.
+# 1. Bump VERSION, run check/test, then dry-run the whole goreleaser pipeline
+#    (compile/archive/checksum for all targets, no tag needed, nothing published).
 mise run release:prepare -- 0.1.0
 
-# 2. Review the diff, then commit the version bump yourself.
+# 2. Review the diff, then commit the version bump and tag it yourself.
 # git diff
 # git add src/main.ts
 # git commit -m "Release v0.1.0"
+# git tag v0.1.0
 
-# 3. Human-only publishing step. This tags, pushes the tag, and creates the GitHub Release.
+# 3. Human-only publishing step. This pushes the commit + tag, then goreleaser
+#    rebuilds from the tagged commit and creates the GitHub Release
+#    (release notes are GitHub-generated, token is reused from `gh auth token`).
 mise run release:publish -- 0.1.0 --i-understand-this-pushes-and-publishes
 ```
 
-`release:publish` refuses to run unless the working tree is clean, so the tag points at a committed
-version bump instead of an uncommitted local edit.
+`release:publish` refuses to run unless the working tree is clean, the tag exists, the tag points
+at HEAD, and the tag matches `VERSION` in `src/main.ts` — so the published binaries are always
+built from the exact commit the tag points at.
 
 New machine checklist: clone this repo → `mise install` → build & copy the binary → clone your notes
 repo yourself → `gistan root init <notes-repo-dir>`.

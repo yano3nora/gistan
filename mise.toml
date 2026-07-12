@@ -7,13 +7,14 @@
 
 [tools]
 deno = "2.9.1"
+goreleaser = "2"
 
 [tasks."release:prepare"]
-description = "Bump VERSION, run checks/tests, and build GitHub Release assets"
+description = "Bump VERSION, run checks/tests, and dry-run the goreleaser pipeline (no publish)"
 run = "deno run --allow-read --allow-write --allow-run --allow-env scripts/release.ts prepare"
 
 [tasks."release:publish"]
-description = "Tag, push, and create the GitHub Release from prepared assets (human-only)"
+description = "Push the tagged commit and create the GitHub Release via goreleaser (human-only)"
 run = "deno run --allow-read --allow-write --allow-run --allow-env scripts/release.ts publish"
 
 # [env]
