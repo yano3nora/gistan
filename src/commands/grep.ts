@@ -6,6 +6,7 @@ import {
   detectBat,
   FZF_ABORTED,
   FZF_NO_MATCH,
+  LAYOUT,
   openEditor,
   PREVIEW_SCROLL_BIND,
   PREVIEW_WINDOW,
@@ -95,6 +96,8 @@ export async function run(command: CommandArgs, context: CommandContext): Promis
     picked = await context.runner("fzf", [
       "--ansi",
       "--disabled", // fzf does no filtering itself; rg (via reload) is the matcher
+      "--layout",
+      LAYOUT,
       "--query",
       query,
       "--delimiter",

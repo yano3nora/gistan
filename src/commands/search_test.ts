@@ -115,7 +115,9 @@ Deno.test("render: a path-only hit joins the set and renders without :line:", as
   assertEquals(stripAnsi(io.stdout), "cc/three.md\n");
 });
 
-Deno.test("render: rows sort by display path (stars/ kept, gists/ stripped)", async () => {
+Deno.test("render: rows sort by display path within a tier (stars/ kept, gists/ stripped)", async () => {
+  // "note" appears in stars/o/g/note.md's own filename, so that file jumps
+  // to the path-hit tier; the two body-only hits follow in path order.
   const { runner } = renderRunner({
     files: FILES,
     liByTerm: { note: ["stars/o/g/note.md", "gists/cc/three.md", "gists/aa/one.md"] },
@@ -129,7 +131,27 @@ Deno.test("render: rows sort by display path (stars/ kept, gists/ stripped)", as
   assertEquals(await runSearchRender(["note"], io.context), 0);
   assertEquals(
     stripAnsi(io.stdout),
-    "aa/one.md:5: note here\ncc/three.md:9: a note too\nstars/o/g/note.md:1: note text\n",
+    "stars/o/g/note.md:1: note text\naa/one.md:5: note here\ncc/three.md:9: a note too\n",
+  );
+});
+
+Deno.test("render: path-hit files rank above content-only files, each tier path-sorted", async () => {
+  // Alphabetically the content-only file (aa/) precedes both path-hit files
+  // (mm/, zz-foo/) — the tiering must override the global dictionary order.
+  const files = ["gists/aa/one.md", "gists/zz-foo/note.md", "gists/mm/foo-guide.md"];
+  const { runner } = renderRunner({
+    files,
+    liByTerm: { foo: ["gists/aa/one.md", "gists/mm/foo-guide.md"] },
+    hits: [
+      "gists/aa/one.md:2:body foo only",
+      "gists/mm/foo-guide.md:3:foo in path and body",
+    ],
+  });
+  const io = memoryContext(runner, "/nonexistent");
+  assertEquals(await runSearchRender(["foo"], io.context), 0);
+  assertEquals(
+    stripAnsi(io.stdout),
+    "mm/foo-guide.md:3: foo in path and body\nzz-foo/note.md\naa/one.md:2: body foo only\n",
   );
 });
 
@@ -243,6 +265,8 @@ Deno.test("search runs fzf disabled+ansi with self-render reload binds", async (
   );
   // Long prose must wrap: fzf previews cannot scroll horizontally.
   assertEquals(fzf.args[fzf.args.indexOf("--preview-window") + 1], "wrap");
+  // Path-sorted rows read A->Z from the top; never inherit a bottom-up layout.
+  assertEquals(fzf.args[fzf.args.indexOf("--layout") + 1], "reverse");
   assert(fzf.args.some((arg) => arg.startsWith("ctrl-o:execute-silent(")));
 });
 

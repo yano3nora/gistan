@@ -15,7 +15,8 @@ import { writeText } from "./types.ts";
  * case-insensitive LITERAL (no regex — `'` `^` `$` are ordinary characters).
  *
  * Runs with cwd = repo (fzf's reload inherits fzf's cwd), so no config
- * resolution happens here. Output: one row per file, display-path-sorted,
+ * resolution happens here. Output: one row per file — the path-hit tier
+ * first, then content-only files, each tier display-path-sorted —
  * `<display path>:<line>: <excerpt>` for content hits or just the display
  * path for path-only hits. gists/ is stripped from display, stars/ kept.
  */
@@ -66,9 +67,22 @@ export async function runSearchRender(
   }
 
   const hits = await firstHits(context, positives, [...candidates]);
+  // The only ranking that exists (deliberately no scoring beyond this):
+  // files whose display path contains a positive term form the first tier —
+  // a dirname/filename hit is a stronger signal than a body hit. Within
+  // each tier the order stays display-path ascending, so results remain
+  // deterministic and directory-clustered.
+  const inPath = (display: string) => {
+    const lower = display.toLowerCase();
+    return positives.some((term) => lower.includes(term.toLowerCase()));
+  };
   const rows = [...candidates]
     .map((file) => ({ display: displayPath(file), hit: hits.get(file) }))
-    .sort((a, b) => a.display < b.display ? -1 : a.display > b.display ? 1 : 0)
+    .sort((a, b) => {
+      const tier = Number(!inPath(a.display)) - Number(!inPath(b.display));
+      if (tier !== 0) return tier;
+      return a.display < b.display ? -1 : a.display > b.display ? 1 : 0;
+    })
     .map(({ display, hit }) =>
       hit === undefined
         // Path-only match: the term(s) only occur in the path itself.

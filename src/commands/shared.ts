@@ -88,6 +88,15 @@ export const PREVIEW_SCROLL_BIND =
  */
 export const PREVIEW_WINDOW = "wrap";
 
+/**
+ * The result list is path-sorted, not relevance-ranked (fzf runs --disabled;
+ * the renderers emit display-path order so directories cluster). fzf's
+ * stock bottom-up layout would show that list Z→A from the top of the
+ * screen, so pin top-down explicitly — first row and cursor at the top —
+ * instead of leaving it to whatever FZF_DEFAULT_OPTS happens to say.
+ */
+export const LAYOUT = "reverse";
+
 const OPENER = Deno.build.os === "darwin" ? "open" : "xdg-open";
 
 /**

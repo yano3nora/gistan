@@ -201,6 +201,8 @@ Deno.test("shift-up / shift-down scroll the preview; ctrl-u clears the query; th
   );
   // Long prose must wrap: fzf previews cannot scroll horizontally.
   assertEquals(fzf?.args[fzf.args.indexOf("--preview-window") + 1], "wrap");
+  // Path-sorted rows read A->Z from the top; never inherit a bottom-up layout.
+  assertEquals(fzf?.args[fzf.args.indexOf("--layout") + 1], "reverse");
 });
 
 Deno.test("the preview self-invokes __preview grep with the row's path and line", async () => {
