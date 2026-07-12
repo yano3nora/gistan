@@ -24,11 +24,21 @@ v0.5.0 で当初計画 (v1 / v2 / v3 + UX 改善) の全機能が実装済み。
 
 強い残タスクは無い。以下は「必要になったら」の優先順。
 
+0. **search レイテンシ改善 (実装指示書作成済み、後続 AI に委任)** → [TASK-260712-search-latency](./TASK-260712-search-latency.md)
+    - [ ] Option A (rg 並列化) + Option B (dynamic import 化) の実装。完了条件・計測手順は TASK 参照
 1. **star 機能の実機確認 3 件 (軽い、人間実行)** → [TASK-260706-gistan-v3-star](./TASK-260706-gistan-v3-star.md) の未チェック項目
     - [ ] search / edit で stars が read-only 表示されること
     - [ ] mirror が commit されない (`gistan root status` に現れない) こと
     - [ ] `gistan rm` が stars/ を拒否すること
 2. **配布の強化 (リリース形状が安定したと判断したら)** → [TASK-260708-mise-github-release-distribution](./TASK-260708-mise-github-release-distribution.md) Remaining work
+    - [ ] release flow の一部を goreleaser に寄せる (compile / archive / checksum / GitHub Release 作成のみ切り出し)
+        - 背景: 別の Rust プロジェクトでもバイナリ配布のリリーススクリプトが必要になり、同種コードの重複を避けて goreleaser (v2.5+ で Deno / Rust builder を公式サポート) に共通化したい。薄い wrapper script は各プロジェクトに残る前提で、中身の大半を goreleaser に寄せられればよい
+        - 合意済みの設計 (260712):
+            1. prepare: version bump + check/test + `goreleaser release --snapshot --clean` (tag 不要のドライランでビルド〜archive〜checksum まで検証。失敗しうることはここで全部失敗させる)
+            2. 人間: version bump を commit し、git tag を打つ (goreleaser は tag 済み・clean tree 前提のため、tag は publish 前に必要)
+            3. publish: 薄い wrapper に縮退 — clean tree 確認 → tag と `src/main.ts` の VERSION 一致確認 (deno compile は version 注入不可のため手動 bump が残る。この一致チェックが最後の網) → `git push && git push --tags` → `goreleaser release --clean`。`--i-understand-this-pushes-and-publishes` ガードは維持
+        - 副次効果: tag が指すコミットからビルドされる形になり provenance が改善する (現行は commit 前の working tree からビルドしている)。Artifact Attestations とも相性が良い
+        - 実機確認: archive 名・checksums 形式の変更が mise の `github:yano3nora/gistan` 解決に影響しうるため、goreleaser 化後の初回リリースで mise からのインストールを確認すること
     - [ ] mise 上流 registry 登録 (`mise use -g gistan` の短縮形が欲しくなったら)
     - [ ] tag-trigger のリリース自動化 (手動リリースを数回重ねてから)
     - [ ] GitHub Artifact Attestations / provenance (任意)
