@@ -71,10 +71,22 @@ export async function pickFile(
 /**
  * shift-up / shift-down scroll the preview pane; ctrl-u clears the query
  * (readline muscle memory — an earlier ctrl-u:preview-scroll bind shadowed
- * it and got in the way of retyping a search). Shared by search and grep.
+ * it and got in the way of retyping a search); ctrl-/ toggles preview line
+ * wrapping (fzf previews cannot scroll horizontally, so unwrapped is only
+ * useful to keep code/table alignment readable — hence wrap is the default,
+ * see PREVIEW_WINDOW). ctrl-w stays fzf's delete-word. Shared by search
+ * and grep.
  */
 export const PREVIEW_SCROLL_BIND =
-  "shift-up:preview-half-page-up,shift-down:preview-half-page-down,ctrl-u:clear-query";
+  "shift-up:preview-half-page-up,shift-down:preview-half-page-down,ctrl-u:clear-query," +
+  "ctrl-/:toggle-preview-wrap";
+
+/**
+ * Long prose lines (the common case in a notes repo) must not run off the
+ * pane: fzf previews have no horizontal scrolling at all, so without wrap
+ * the overflow is simply unreachable. ctrl-/ toggles it off per session.
+ */
+export const PREVIEW_WINDOW = "wrap";
 
 const OPENER = Deno.build.os === "darwin" ? "open" : "xdg-open";
 

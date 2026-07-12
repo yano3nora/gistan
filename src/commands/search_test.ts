@@ -237,9 +237,12 @@ Deno.test("search runs fzf disabled+ansi with self-render reload binds", async (
   }
   assert(
     fzf.args.includes(
-      "shift-up:preview-half-page-up,shift-down:preview-half-page-down,ctrl-u:clear-query",
+      "shift-up:preview-half-page-up,shift-down:preview-half-page-down,ctrl-u:clear-query," +
+        "ctrl-/:toggle-preview-wrap",
     ),
   );
+  // Long prose must wrap: fzf previews cannot scroll horizontally.
+  assertEquals(fzf.args[fzf.args.indexOf("--preview-window") + 1], "wrap");
   assert(fzf.args.some((arg) => arg.startsWith("ctrl-o:execute-silent(")));
 });
 

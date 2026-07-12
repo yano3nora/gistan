@@ -8,6 +8,7 @@ import {
   FZF_NO_MATCH,
   openEditor,
   PREVIEW_SCROLL_BIND,
+  PREVIEW_WINDOW,
   requireConfig,
   selfCommand,
   toRelPath,
@@ -90,6 +91,8 @@ export async function run(command: CommandArgs, context: CommandContext): Promis
       "--bind",
       browseBind(mapFile),
       ...(config.viewer === undefined ? [] : ["--bind", viewerBind(config.viewer)]),
+      "--preview-window",
+      PREVIEW_WINDOW,
       "--preview",
       previewCmd,
     ], { cwd: config.repo });

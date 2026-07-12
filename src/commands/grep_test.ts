@@ -186,7 +186,7 @@ Deno.test("both reload branches sort by path so directories cluster", async () =
   assert(reload.includes("sed 's|^gists/||' | sort; fi"));
 });
 
-Deno.test("shift-up / shift-down scroll the preview; ctrl-u clears the query", async () => {
+Deno.test("shift-up / shift-down scroll the preview; ctrl-u clears the query; the pane wraps", async () => {
   const { home } = await fixture();
   const { runner, calls } = grepRunner({ code: 0, stdout: "" });
   const io = memoryContext(runner, home, { editor: "vim" });
@@ -195,9 +195,12 @@ Deno.test("shift-up / shift-down scroll the preview; ctrl-u clears the query", a
   const fzf = calls.find((call) => call.cmd === "fzf" && call.args.includes("--disabled"));
   assert(
     fzf?.args.includes(
-      "shift-up:preview-half-page-up,shift-down:preview-half-page-down,ctrl-u:clear-query",
+      "shift-up:preview-half-page-up,shift-down:preview-half-page-down,ctrl-u:clear-query," +
+        "ctrl-/:toggle-preview-wrap",
     ),
   );
+  // Long prose must wrap: fzf previews cannot scroll horizontally.
+  assertEquals(fzf?.args[fzf.args.indexOf("--preview-window") + 1], "wrap");
 });
 
 Deno.test("the preview self-invokes __preview grep with the row's path and line", async () => {

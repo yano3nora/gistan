@@ -114,7 +114,7 @@ gistan root status
   - **空白区切り = file 単位の順不同 AND**、`!term` = その term を含む file を除外。term は常に case-insensitive の literal (regex ではない。`'` `^` `$` も普通の文字)
   - マッチ対象は内容 + display path (dirname / filename)。一覧は `display_path:line: ヒット前後の抜粋` (前後 ~60 文字、切れた端は `…`) の形式で display path 順に sort。path のみヒットの file は path だけの行。display path は `gists/` を除去し `stars/` は残す。term のヒット箇所は色付けされる
   - 空 query (または正 term なし) は全 file の一覧
-  - Enter は選択行の `:line:` へそのまま jump して editor を開く。preview も自己呼び出し (`<self> __preview`) で TypeScript 描画: `bat` があれば syntax highlight を敷き (無ければ plain)、全 term の一致箇所を reverse video (SGR 7) で強調して最初の一致行付近へ位置合わせる。反転は色状態に触れないため bat の配色と共存できる (色での強調は ANSI と干渉するので不可)。shift-up / shift-down で scroll。ctrl-u は query の全消去。ctrl-o は選択中 item の gist URL をブラウザで開く (fzf は抜けない。未 publish dir と `stars/*` は no-op)
+  - Enter は選択行の `:line:` へそのまま jump して editor を開く。preview も自己呼び出し (`<self> __preview`) で TypeScript 描画: `bat` があれば syntax highlight を敷き (無ければ plain)、全 term の一致箇所を reverse video (SGR 7) で強調して最初の一致行付近へ位置合わせる。反転は色状態に触れないため bat の配色と共存できる (色での強調は ANSI と干渉するので不可)。preview pane は wrap がデフォルト (fzf の preview に横 scroll は存在しないため、折り返さないと長行の続きを読む手段がない)。shift-up / shift-down で scroll、ctrl-/ で wrap の toggle (コードや表の桁揃えを見たいとき用)。ctrl-u は query の全消去。ctrl-o は選択中 item の gist URL をブラウザで開く (fzf は抜けない。未 publish dir と `stars/*` は no-op)
   - ctrl-v は選択中 file を config の `viewer` コマンド (例: markdown viewer) に渡す。viewer を quit すると fzf に戻る。`viewer` 未設定なら bind 自体を張らない
 - `grep` は旧 search の行レベル regex 検索 (query 全体が 1 本の rg regex、キーストローク毎に再実行)。「一致行を正確に探す」場面用に温存。表示 (`gists/` 除去 + path sort)、preview (一致 span は `rg --json` から取得し、選択行 `{2}` 付近へ位置合わせ)、ctrl-o、ctrl-v、`--path|-p` は search と同等 (TASK-260708 followup 2)
 
