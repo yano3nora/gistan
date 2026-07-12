@@ -419,6 +419,11 @@ Deno.test("search runs fzf disabled+ansi with self-render reload binds", async (
   assertEquals(fzf.args[fzf.args.indexOf("--layout") + 1], "reverse");
   assert(fzf.args.some((arg) => arg.startsWith("ctrl-o:execute-silent(")));
   assert(fzf.args.some((arg) => arg.startsWith("ctrl-y:execute-silent(")));
+  assert(
+    fzf.args.includes(
+      "left-click:ignore,double-click:ignore,scroll-up:ignore,scroll-down:ignore",
+    ),
+  );
 });
 
 Deno.test("fzf gets the row-protocol delimiter and with-nth so ids stay hidden", async () => {

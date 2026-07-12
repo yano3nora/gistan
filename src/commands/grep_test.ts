@@ -70,6 +70,11 @@ Deno.test("grep runs fzf disabled+ansi with the grep-render reload bind", async 
   assertEquals(fzf.args[fzf.args.indexOf("--with-nth") + 1], "3..");
   assert(fzf.args.some((arg) => arg.startsWith("ctrl-o:execute-silent(")));
   assert(fzf.args.some((arg) => arg.startsWith("ctrl-y:execute-silent(")));
+  assert(
+    fzf.args.includes(
+      "left-click:ignore,double-click:ignore,scroll-up:ignore,scroll-down:ignore",
+    ),
+  );
 });
 
 Deno.test("shift-up / shift-down scroll the preview; ctrl-u clears the query; the pane wraps", async () => {

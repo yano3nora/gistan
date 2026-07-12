@@ -90,6 +90,15 @@ export const PREVIEW_SCROLL_BIND =
   "ctrl-/:toggle-preview-wrap";
 
 /**
+ * Keep mouse-wheel scrolling available in the preview pane, but make the
+ * result list keyboard-only. fzf reports preview wheel input as the separate
+ * preview-scroll-* events, so ignoring the list's click/scroll events does
+ * not prevent mouse scrolling over the preview or its scrollbar.
+ */
+export const RESULT_MOUSE_BIND =
+  "left-click:ignore,double-click:ignore,scroll-up:ignore,scroll-down:ignore";
+
+/**
  * Long prose lines (the common case in a notes repo) must not run off the
  * pane: fzf previews have no horizontal scrolling at all, so without wrap
  * the overflow is simply unreachable. ctrl-/ toggles it off per session.
@@ -242,6 +251,8 @@ export async function runQueryUi(
     `change:reload:${reloadCmd}`,
     "--bind",
     PREVIEW_SCROLL_BIND,
+    "--bind",
+    RESULT_MOUSE_BIND,
     "--bind",
     openBind(self("__open {1}")),
     "--bind",

@@ -2,7 +2,12 @@
 
 ## Status
 
-Next iteration. This task records the design only; implementation is intentionally deferred.
+Closed (YAGNI).
+
+Default preview is wrapped, so an off-screen horizontal hit is already brought into view by line
+wrapping. The existing vertical anchor and reverse-video emphasis make the hit identifiable without
+adding a separate pan renderer. No implementation is planned unless a concrete case remains hard to
+identify in the default wrapped view.
 
 ## Problem
 
