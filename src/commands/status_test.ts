@@ -193,3 +193,11 @@ Deno.test("a dirname filter always shows its item even when in-sync", async () =
   assertEquals(await run({ name: "status", args: ["one"] }, io.context), 0);
   assert(io.stdout.includes("one"));
 });
+
+Deno.test("a dirname filter that matches nothing is a lookup error, not an empty repo", async () => {
+  const { home } = await published();
+  const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home);
+  assertEquals(await run({ name: "status", args: ["nope"] }, io.context), 1);
+  assert(io.stderr.includes("nope not found"));
+  assert(!io.stdout.includes("no gists yet"));
+});

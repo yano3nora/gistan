@@ -95,6 +95,25 @@ export function resolveCommand(name: string | undefined): CommandName | undefine
 export async function run(argv: readonly string[], options: RunOptions = {}): Promise<number> {
   const context = options.context ?? defaultContext();
   const commands = { ...COMMANDS, ...options.commands };
+  try {
+    return await dispatch(argv, commands, context);
+  } catch (error) {
+    // Commands wrap their own expected failures; whatever still reaches here
+    // (an unreadable index, a bug) must exit with one friendly line, not a
+    // stack trace — direct repo manipulation must never crash the CLI.
+    await writeText(
+      context.stderr,
+      `error: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
+    return 1;
+  }
+}
+
+async function dispatch(
+  argv: readonly string[],
+  commands: Record<CommandName, CommandHandler>,
+  context: CommandContext,
+): Promise<number> {
   const [first, ...rest] = argv;
 
   if (first === undefined) {

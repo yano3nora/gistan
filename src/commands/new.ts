@@ -14,9 +14,18 @@ export async function run(command: CommandArgs, context: CommandContext): Promis
     string: ["d", "description"],
     alias: { d: "description" },
   });
-  const arg = flags._.map(String).at(0);
-  if (!arg) {
+  const raw = flags._.map(String).at(0);
+  if (!raw) {
     await err("usage: gistan new [-d <desc>] <filename|dirname/filename>\n");
+    return 2;
+  }
+  // Accept the gists/ prefix out of habit (rm/publish tolerate it too), and
+  // refuse anything deeper than gists/<dirname>/<filename> here — `new` is
+  // the convention-enforcing entry point (ADR-0001), and a nested file could
+  // never be published (gist filenames cannot contain '/').
+  const arg = raw.replace(/^gists\//, "");
+  if (arg.split("/").length > 2) {
+    await err(`error: gists/<dirname>/<filename> is the deepest layout — cannot create ${raw}\n`);
     return 2;
   }
   if (basename(arg) === DESCRIPTION_FILE) {

@@ -39,6 +39,11 @@ export async function run(command: CommandArgs, context: CommandContext): Promis
   if (filter) items = items.filter((i) => i.dirname === filter);
   if (flags.fix) return await fix(config.repo, items, remote ?? new Map(), context);
   if (items.length === 0) {
+    // A dirname filter that matched nothing is a lookup miss, not an empty repo.
+    if (filter) {
+      await err(`error: ${filter} not found under gists/\n`);
+      return 1;
+    }
     await out("no gists yet — create one under gists/<dirname>/\n");
     return 0;
   }

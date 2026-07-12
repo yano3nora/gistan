@@ -51,3 +51,11 @@ Deno.test("state v1 is rejected with restructure guidance", async () => {
   );
   await assertRejects(() => loadState(repo), Error, "index schema v1 detected");
 });
+
+Deno.test("saveState writes atomically and leaves no temp file behind", async () => {
+  const repo = await Deno.makeTempDir();
+  await saveState(repo, { version: 2, gists: {} });
+  const names: string[] = [];
+  for await (const entry of Deno.readDir(join(repo, ".gistan"))) names.push(entry.name);
+  assertEquals(names, ["state.json"]);
+});

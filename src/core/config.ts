@@ -5,7 +5,7 @@ export interface Config {
   /** Absolute path to the gist repo (the markdown source of truth). */
   readonly repo: string;
   /**
-   * Command the ctrl-t bind in `search` / `grep` hands the selected file to
+   * Command the ctrl-v bind in `search` / `grep` hands the selected file to
    * (e.g. "leaf", "glow -p"). Unset = the bind is not installed. Set by
    * hand-editing config.toml; `root init` preserves it.
    */

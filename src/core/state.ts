@@ -19,8 +19,10 @@ export interface State {
 
 export const EMPTY_STATE: State = { version: 2, gists: {} };
 
+// No "error:" prefix here — main.ts's top-level guard adds it when this throw
+// surfaces to the user.
 const V1_ERROR =
-  "error: index schema v1 detected — gistan v2 restructured the repo layout. Re-run 'gistan root init' with a fresh repo and 'gistan import'. See docs/TASK-260708-gists-multi-file-restructure.md";
+  "index schema v1 detected — gistan v2 restructured the repo layout. Re-run 'gistan root init' with a fresh repo and 'gistan import'. See docs/TASK-260708-gists-multi-file-restructure.md";
 
 export function statePath(repoDir: string): string {
   return join(repoDir, ".gistan", "state.json");
@@ -52,8 +54,10 @@ export async function saveState(repoDir: string, state: State): Promise<void> {
     gists[dir] = { ...entry, files };
   }
   await Deno.mkdir(join(repoDir, ".gistan"), { recursive: true });
-  await Deno.writeTextFile(
-    statePath(repoDir),
-    `${JSON.stringify({ version: 2, gists }, null, 2)}\n`,
-  );
+  // Write-then-rename so a crash mid-write can never leave a truncated index
+  // behind (rename within a directory is atomic on POSIX filesystems).
+  const path = statePath(repoDir);
+  const tmp = `${path}.tmp`;
+  await Deno.writeTextFile(tmp, `${JSON.stringify({ version: 2, gists }, null, 2)}\n`);
+  await Deno.rename(tmp, path);
 }

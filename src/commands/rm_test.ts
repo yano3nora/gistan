@@ -138,3 +138,15 @@ Deno.test("rm errors for missing file", async () => {
   assertEquals(await run({ name: "rm", args: ["one/a.md"] }, io.context), 1);
   assert(io.stderr.includes("not found"));
 });
+
+Deno.test("rm rejects a nested pick instead of crashing on the directory", async () => {
+  const { home, repo } = await fixture();
+  await Deno.mkdir(join(repo, "gists", "one", "sub"), { recursive: true });
+  await Deno.writeTextFile(join(repo, "gists", "one", "sub", "x.md"), "X");
+  const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home, {
+    confirmAnswer: true,
+  });
+  assertEquals(await run({ name: "rm", args: ["one/sub/x.md"] }, io.context), 1);
+  assert(io.stderr.includes("choose a file under gists/"));
+  assertEquals(await Deno.readTextFile(join(repo, "gists", "one", "sub", "x.md")), "X");
+});

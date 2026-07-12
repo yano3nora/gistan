@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertRejects } from "@std/assert";
 import { fixture, join, memoryContext } from "./test_helpers.ts";
 import { run } from "./new.ts";
 
@@ -51,4 +51,20 @@ Deno.test("new without arg returns usage", async () => {
   const { home } = await fixture();
   const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home);
   assertEquals(await run({ name: "new", args: [] }, io.context), 2);
+});
+
+Deno.test("new strips a habitual gists/ prefix", async () => {
+  const { home, repo } = await fixture();
+  const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home);
+  assertEquals(await run({ name: "new", args: ["gists/memo/a.txt"] }, io.context), 0);
+  assertEquals(await Deno.readTextFile(join(repo, "gists", "memo", "a.txt")), "");
+});
+
+Deno.test("new refuses nesting deeper than gists/<dirname>/<filename>", async () => {
+  const { home, repo } = await fixture();
+  const io = memoryContext(() => Promise.resolve({ code: 0, stdout: "", stderr: "" }), home);
+  assertEquals(await run({ name: "new", args: ["a/b/c.md"] }, io.context), 2);
+  assert(io.stderr.includes("deepest layout"));
+  // Nothing was created for the rejected path.
+  await assertRejects(() => Deno.stat(join(repo, "gists", "a")), Deno.errors.NotFound);
 });

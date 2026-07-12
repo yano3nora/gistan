@@ -22,11 +22,15 @@ export async function run(command: CommandArgs, context: CommandContext): Promis
     return 1;
   }
   if (!rel.startsWith("gists/")) rel = `gists/${rel}`;
-  const [_, dir, file] = rel.split("/");
-  if (!dir || !file) {
+  // Exactly gists/<dirname>/<filename>: a nested pick (gists/a/b/c.md) would
+  // otherwise resolve "b" as the filename, stat the directory, and crash on
+  // the non-recursive Deno.remove — nested files are unmanaged (SPEC-0001).
+  const segments = rel.split("/");
+  if (segments.length !== 3 || !segments[1] || !segments[2]) {
     await err("error: choose a file under gists/<dirname>/\n");
     return 1;
   }
+  const [, dir, file] = segments;
   const path = join(config.repo, "gists", dir, file);
   if (!(await exists(path))) {
     await err(`error: ${rel} not found\n`);

@@ -139,7 +139,8 @@ src/
 │                         # removed-command hints, hidden renderer routing
 ├ commands/
 │ ├ types.ts              # CommandContext (stdout/runner/confirm/editor) — every command's interface
-│ ├ shared.ts             # config guard, fzf helpers, browse (ctrl-o) / preview / viewer binds
+│ ├ shared.ts             # config guard, fzf binds (ctrl-o browse / preview / viewer), and
+│ │                       # runQueryUi — the whole fzf session search and grep share
 │ ├ new.ts / edit.ts / list.ts / rm.ts     # local file operations (fzf pick + $EDITOR)
 │ ├ search.ts             # document-unit search: fzf --disabled + self-reload UI
 │ ├ search_render.ts      #   hidden `__search-render`: query parse, AND/exclude, excerpt, colors

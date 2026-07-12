@@ -1,11 +1,12 @@
-import { basename, fromFileUrl } from "@std/path";
+import { parseArgs } from "@std/cli/parse-args";
+import { basename, fromFileUrl, resolve } from "@std/path";
 import type { Config } from "../core/config.ts";
 import { loadConfig } from "../core/config.ts";
 import { checkDeps, DEPS } from "../core/deps.ts";
 import { gistUrl } from "../core/gh.ts";
 import type { Runner } from "../core/proc.ts";
 import { loadState } from "../core/state.ts";
-import type { CommandContext } from "./types.ts";
+import type { CommandArgs, CommandContext } from "./types.ts";
 import { writeText } from "./types.ts";
 
 /** Loads the config or explains how to get one; callers return 1 on undefined. */
@@ -38,7 +39,13 @@ export async function exists(path: string): Promise<boolean> {
 export const FZF_NO_MATCH = 1;
 export const FZF_ABORTED = 130;
 
-const LIST_CMD = "rg --files --no-ignore gists stars";
+/**
+ * The full file listing search/grep/pickFile browse. stars/ is gitignored
+ * (a cache), so --no-ignore insures it is never dropped from results,
+ * whatever a given rg version's ignore semantics for explicit path
+ * arguments are.
+ */
+export const LIST_CMD = "rg --files --no-ignore gists stars";
 
 /** Fuzzy file pick; path === undefined means the user left without choosing. */
 export async function pickFile(
@@ -207,4 +214,104 @@ export async function openEditor(
     interactive: true,
   });
   return opened.code;
+}
+
+/**
+ * The interactive query session `search` and `grep` share end-to-end:
+ * config + rg/fzf presence checks, the dirname->gist-id map file lifecycle,
+ * the fzf invocation (--disabled: the reload command is the matcher, fzf
+ * only displays), and the selection handling (`--path`/-p prints the
+ * absolute path, anything else opens the editor at the row's line). The
+ * commands differ only in the reload command that renders the list — and,
+ * derived from command.name, the __preview argv (grep passes the selected
+ * row's own line {2} as the preview anchor; search rows have no such field,
+ * so its preview finds the first match itself).
+ */
+export async function runQueryUi(
+  command: CommandArgs,
+  context: CommandContext,
+  reloadCmd: string,
+): Promise<number> {
+  const err = (text: string) => writeText(context.stderr, text);
+  const out = (text: string) => writeText(context.stdout, text);
+  const flags = parseArgs([...command.args], { boolean: ["path"], alias: { p: "path" } });
+
+  const config = await requireConfig(context);
+  if (config === undefined) {
+    return 1;
+  }
+
+  const needed = DEPS.filter((dep) => dep.name === "rg" || dep.name === "fzf");
+  const report = await checkDeps(context.runner, needed);
+  const missing = [...report.missingRequired, ...report.missingOptional];
+  if (missing.length > 0) {
+    for (const dep of missing) {
+      await err(`error: ${dep.name} is required for ${command.name} — ${dep.hint}\n`);
+    }
+    return 1;
+  }
+
+  const query = flags._.map(String).join(" ");
+  const bat = (await detectBat(context.runner)) ? "bat" : "nobat";
+  const previewTail = command.name === "grep" ? "{q} {1} {2}" : "{q} {1}";
+  const previewCmd = selfCommand(
+    Deno.execPath(),
+    Deno.mainModule,
+    `__preview ${command.name} ${bat} ${previewTail}`,
+  );
+  const mapFile = await writeGistMapFile(config.repo);
+  let picked;
+  try {
+    picked = await context.runner("fzf", [
+      "--ansi",
+      "--disabled",
+      "--layout",
+      LAYOUT,
+      "--query",
+      query,
+      "--delimiter",
+      ":",
+      "--bind",
+      `start:reload:${reloadCmd}`,
+      "--bind",
+      `change:reload:${reloadCmd}`,
+      "--bind",
+      PREVIEW_SCROLL_BIND,
+      "--bind",
+      browseBind(mapFile),
+      ...(config.viewer === undefined ? [] : ["--bind", viewerBind(config.viewer)]),
+      "--preview-window",
+      PREVIEW_WINDOW,
+      "--preview",
+      previewCmd,
+    ], { cwd: config.repo });
+  } finally {
+    // The map is only meaningful while fzf is running; never leave it behind.
+    await Deno.remove(mapFile).catch(() => {});
+  }
+
+  if (picked.code === FZF_NO_MATCH || picked.code === FZF_ABORTED) {
+    return 0;
+  }
+  if (picked.code !== 0) {
+    await err(`error: fzf failed: ${picked.stderr.trim() || `exit ${picked.code}`}\n`);
+    return 1;
+  }
+
+  // fzf strips the renderer's ANSI codes before printing the selection
+  // (--ansi, verified against a real session), so this is plain
+  // "display_path:line: …" — or just the path for path-only rows. Displayed
+  // paths have gists/ stripped for readability; restore the repo-relative
+  // path before touching the filesystem.
+  const selection = picked.stdout.split("\n").at(0)?.trim() ?? "";
+  if (selection === "") {
+    return 0;
+  }
+  const [displayPath, line] = selection.split(":");
+  const path = toRelPath(displayPath);
+  if (flags.path) {
+    await out(`${resolve(config.repo, path)}\n`);
+    return 0;
+  }
+  return await openEditor(context, config.repo, path, line);
 }

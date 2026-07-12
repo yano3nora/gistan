@@ -236,3 +236,17 @@ Deno.test("__preview dispatches to the hidden preview renderer, not the search f
 Deno.test("__preview is not advertised in usage()", () => {
   assertEquals(usage().includes("__preview"), false);
 });
+
+Deno.test("a command that throws exits 1 with one error line, not a stack trace", async () => {
+  const io = memoryContext();
+  const code = await run(["list"], {
+    context: io.context,
+    commands: {
+      list: () => {
+        throw new Error("boom");
+      },
+    },
+  });
+  assertEquals(code, 1);
+  assertEquals(io.stderr, "error: boom\n");
+});

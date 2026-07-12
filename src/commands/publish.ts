@@ -34,6 +34,12 @@ export async function run(command: CommandArgs, context: CommandContext): Promis
     target = picked.path;
     if (!target) return 0;
   }
+  // The picker lists stars/ too (it is searchable); publishing a mirror is
+  // not — fail with the real reason instead of "gists/stars/... not found".
+  if (target.startsWith("stars/")) {
+    await err("error: stars/ is a read-only mirror cache and cannot be published\n");
+    return 1;
+  }
   const dir = targetToDir(target);
   const scan = await scanGistDirs(config.repo);
   if (scan.nestedFiles.some((p) => p.startsWith(`gists/${dir}/`))) {
