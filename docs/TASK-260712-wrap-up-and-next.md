@@ -36,7 +36,7 @@ v0.5.0 で当初計画 (v1 / v2 / v3 + UX 改善) の全機能が実装済み。
     - [ ] index の複数マシン間 merge conflict → per-gist sidecar 分割
     - [ ] tags の再導入 (v2 で全廃。必要性が明確になるまで戻さない)
     - [ ] integration / e2e で実 gist を使う範囲の決定
-    - [ ] クリップボード対応のクロスプラットフォーム化 (現状 publish の URL コピーは pbcopy のみ = macOS 前提)
+    - [x] クリップボード対応のクロスプラットフォーム化 — 260712 対応済み (`core/clipboard.ts`。darwin: pbcopy / windows: clip / それ以外: wl-copy → xclip → xsel の fallback。ツール未導入は黙認、導入済みで失敗したときだけ warn)
 
 ## testcases
 

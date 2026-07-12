@@ -159,6 +159,7 @@ src/
 │ ├ gh.ts                 # all GitHub API access, as `gh api` subprocess wrappers
 │ ├ config.ts             # ~/.config/gistan/config.toml
 │ ├ deps.ts               # external CLI presence checks (gh/git/rg/fzf)
+│ ├ clipboard.ts          # cross-platform copy (pbcopy / clip / wl-copy → xclip → xsel)
 │ ├ proc.ts               # Runner abstraction over subprocesses (swapped out in tests)
 │ └ description.ts        # slugify for import dirnames
 └ testing.ts              # in-memory CommandContext for unit tests

@@ -1,7 +1,7 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { dirname } from "@std/path";
+import { copyToClipboard } from "../core/clipboard.ts";
 import { createGist, deleteGist, type GistFilesPayload, gistUrl, updateGist } from "../core/gh.ts";
-import { EXIT_COMMAND_NOT_FOUND } from "../core/proc.ts";
 import { reconcile } from "../core/reconcile.ts";
 import {
   contentHash,
@@ -137,7 +137,9 @@ export async function run(command: CommandArgs, context: CommandContext): Promis
     return 1;
   }
   await saveState(config.repo, { version: 2, gists: { ...state.gists, [dir]: link } });
-  await copyToClipboard(context, gistUrl(link.id));
+  if (await copyToClipboard(context.runner, gistUrl(link.id)) === "failed") {
+    await writeText(context.stderr, "warn: clipboard copy failed\n");
+  }
   return 0;
 }
 
@@ -176,10 +178,4 @@ async function indexEntry(
     synced_description_hash: description === "" ? null : await textHash(description),
     files: hashes,
   };
-}
-async function copyToClipboard(context: CommandContext, text: string): Promise<void> {
-  const result = await context.runner("pbcopy", [], { stdin: text });
-  if (result.code !== 0 && result.code !== EXIT_COMMAND_NOT_FOUND) {
-    await writeText(context.stderr, "warn: clipboard copy failed\n");
-  }
 }

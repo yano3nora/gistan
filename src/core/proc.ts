@@ -6,7 +6,7 @@ export interface RunResult {
 
 export interface RunOptions {
   readonly cwd?: string;
-  /** Piped to the child's stdin; used for `gh api --input -` bodies and pbcopy. */
+  /** Piped to the child's stdin; used for `gh api --input -` bodies and clipboard tools. */
   readonly stdin?: string;
   /**
    * Inherit all stdio from the parent (fzf UI, $EDITOR sessions). stdout/stderr

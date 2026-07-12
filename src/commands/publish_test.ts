@@ -162,3 +162,31 @@ Deno.test("import then publish updates existing gist instead of creating a dupli
   assertEquals(calls.some((c) => c.includes("POST")), false);
   assert(calls.some((c) => c.includes("PATCH")));
 });
+
+Deno.test("publish warns when a clipboard tool exists but fails", async () => {
+  const { home } = await oneFile();
+  // Exit 1 (not 127) for every non-gh call: whatever clipboard candidates the
+  // host OS tries, all are "present but failing", so the test is OS-independent.
+  const runner: Runner = (_c, args) => {
+    if (args.includes("POST")) {
+      return Promise.resolve({ code: 0, stdout: `gid\t${AT}`, stderr: "" });
+    }
+    return Promise.resolve({ code: 1, stdout: "", stderr: "" });
+  };
+  const io = memoryContext(runner, home, { confirmAnswer: true });
+  assertEquals(await run({ name: "publish", args: ["one"] }, io.context), 0);
+  assert(io.stderr.includes("warn: clipboard copy failed"));
+});
+
+Deno.test("publish stays silent when no clipboard tool is installed", async () => {
+  const { home } = await oneFile();
+  const runner: Runner = (_c, args) => {
+    if (args.includes("POST")) {
+      return Promise.resolve({ code: 0, stdout: `gid\t${AT}`, stderr: "" });
+    }
+    return Promise.resolve({ code: 127, stdout: "", stderr: "" });
+  };
+  const io = memoryContext(runner, home, { confirmAnswer: true });
+  assertEquals(await run({ name: "publish", args: ["one"] }, io.context), 0);
+  assertEquals(io.stderr, "");
+});
