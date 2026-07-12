@@ -15,19 +15,49 @@
 
 ## 実機確認 (軽い、人間実行)
 
-- [ ] **v0.7.0 (ADR-0003 / dirname 廃止) の実機フィードバック** —
-      [TASK-260712-gist-id-restructure](./TASK-260712-gist-id-restructure.md) の testcases 一式。
-      unit テストでは網羅済みだが、実 gist・実 fzf セッションでの確認が未実施。 特に: 日本語
-      description の import / `new --publish` / `push` / `pull` の一括フロー / search の description
-      マッチ・ctrl-y コピー / `status --fix` の conflict 解決
-- [ ] **star 機能の実機確認 3 件** — [TASK-260706-gistan-v3-star](./TASK-260706-gistan-v3-star.md)
-      の未チェック項目
-  - [ ] search / edit で stars が read-only 表示されること
-  - [ ] mirror が commit されない (`gistan root status` に現れない) こと
-  - [ ] `gistan rm` が stars/ を拒否すること
-- [ ] **goreleaser リリースの mise インストール実機確認** — v0.6.0 以降、.sha256 の中身が「hash
-      のみ」に変わった (旧: `hash  filename` の shasum 形式)。`mise use -g github:yano3nora/gistan`
-      で新規インストールが通ることを確認する。archive 名と「バイナリのみ同梱」は旧規約と同一
+v0.7.0 (ADR-0003 / dirname 廃止) と star 機能の実機フィードバック。unit テストでは同等シナリオを
+網羅済み ([TASK-260712-gist-id-restructure](./TASK-260712-gist-id-restructure.md) /
+[TASK-260706-gistan-v3-star](./TASK-260706-gistan-v3-star.md)) だが、実 gist・実 fzf
+セッションでの確認が未実施。コマンドごとに確認する。
+
+- [ ] **`import`**
+  - [ ] 日本語 description の gist を import して `gists/<gist-id>/` に入り、description が index
+        に載る
+- [ ] **`new`**
+  - [ ] `new hello.md` → `gists/_xxxx/hello.md` 生成、path と local-id が表示される
+  - [ ] `new hello.md --publish` → gist 作成 + dir が gist-id へ rename + URL 表示。`--public`
+        なしなら secret
+  - [ ] `new memo.md --id <既存id>` で同一 gist に 2 file 目が作られ、publish で multi-file gist
+        として更新される
+  - [ ] `new dir/file.md` が拒否される
+- [ ] **`publish` / `unpublish`**
+  - [ ] `publish <local-id>` / `publish <gist URL>` が通り、dirname / filename 指定は受け付けない
+  - [ ] `unpublish <id>` で remote 削除 + 新 local-id へ rename + description 引き継ぎ
+- [ ] **`push`**
+  - [ ] local-drift 複数件が列挙され、yes で一括更新
+  - [ ] conflict item は skip され status 誘導が出る
+  - [ ] 未 publish dir が列挙されない
+- [ ] **`pull`**
+  - [ ] remote-drift 複数件の一括取り込み
+  - [ ] remote の description 変更が index に追従する
+- [ ] **`status`**
+  - [ ] `--fix` で conflict の diff 提示・選択ができる
+  - [ ] `--fix` で dir-missing / remote-deleted の修復ができる
+  - [ ] star mirror が commit されない (`gistan root status` に現れない)
+- [ ] **`search`**
+  - [ ] 同名 filename が複数 gist にあるとき description で判別できる
+  - [ ] description への query hit が上段に出る
+  - [ ] ctrl-y で URL / local-id がコピーされる
+  - [ ] ctrl-o が stars / gists 両方で開く
+  - [ ] stars が read-only 表示される
+- [ ] **`edit`**
+  - [ ] stars が read-only 表示される
+- [ ] **`rm`**
+  - [ ] stars/ 配下の指定が拒否される
+- [ ] **コマンド横断**
+  - [ ] v2 の state.json を検出したら再 import 案内で停止する
+  - [ ] 手動で `gists/_drafts/` を作っても status / search が壊れない (unpublished 扱い)
+  - [ ] 同期後の gist file が remote と byte 一致し、`.description.txt` がどこにも生成されない
 
 ## 判断待ち・トリガー待ち (実害や必要性が出たら着手)
 
@@ -61,8 +91,8 @@ SPEC-0001 Open Questions と同期している項目:
 - 2026-07-12 に [TASK-260712-wrap-up-and-next](./TASK-260712-wrap-up-and-next.md) のクローズに伴い、
   同 TASK の todo と各 TASK の未チェック項目をここへ棚卸しした
 - 2026-07-13 に search レイテンシ改善を
-  [TASK-260712-search-latency](./TASK-260712-search-latency.md) として実施。rg 並列化を採用し、dynamic
-  import は実測条件を満たさず不採用
+  [TASK-260712-search-latency](./TASK-260712-search-latency.md) として実施。rg
+  並列化を採用し、dynamic import は実測条件を満たさず不採用
 - 「filename 内 tab の完全なエスケープ機構」は won't-do として棚卸しから除外 (`new`
   での制御文字拒否 + renderer 側の tab 入り path 除外で実害を塞いだ。プロトコルは 複雑化しない —
   TASK-260712-gist-id-restructure codex レビュー見送り)
