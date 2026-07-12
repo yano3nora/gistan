@@ -3,6 +3,8 @@
 260708 root コマンド再編 (init 移動 / sync 廃止 / git ヘルパー)
 ===
 
+> **Status: 完了 (2026-07-08)**。`root status` の追加も含めた最終仕様は [SPEC-0001](./SPEC-0001-gistan-cli.md) を正とする。
+
 ## asis
 
 - `gistan init [dir]` がトップレベルコマンド
@@ -31,20 +33,20 @@ gistan sync                   # 廃止
 
 ## todo
 
-- [ ] `src/commands/root.ts`: サブコマンドディスパッチ (init / path / commit / push / pull) へ書き換え
-- [ ] `src/commands/init.ts` のロジックを `root init` 配下へ移動 (実装は流用、入口だけ変更)
-- [ ] `src/commands/sync.ts` と `sync_test.ts` を削除
-- [ ] `src/main.ts` (コマンド登録): init / sync のトップレベル登録を外し、上記の案内エラーを追加
-- [ ] `docs/SPEC-0001-gistan-cli.md` 更新: コマンド一覧、「git 操作: gistan sync / gistan root」セクション、Edge Cases の local 系コマンド列挙 (`search / edit / list / root`)
-- [ ] `README.md` 更新: セットアップ手順 (`gistan init` → `gistan root init`) と日常操作の説明
+- [x] `src/commands/root.ts`: サブコマンドディスパッチ (init / path / commit / push / pull) へ書き換え
+- [x] `src/commands/init.ts` のロジックを `root init` 配下へ移動 (実装は流用、入口だけ変更)
+- [x] `src/commands/sync.ts` と `sync_test.ts` を削除
+- [x] `src/main.ts` (コマンド登録): init / sync のトップレベル登録を外し、上記の案内エラーを追加
+- [x] `docs/SPEC-0001-gistan-cli.md` 更新: コマンド一覧、「git 操作: gistan sync / gistan root」セクション、Edge Cases の local 系コマンド列挙 (`search / edit / list / root`)
+- [x] `README.md` 更新: セットアップ手順 (`gistan init` → `gistan root init`) と日常操作の説明
 
 ## testcases
 
-- [ ] `root path` が config の repo path を出力する
-- [ ] `root commit`: 変更あり → add -A + commit (-m 指定文言 / 無指定は自動文言)、変更なし → nothing to commit で exit 0
-- [ ] `root push` / `root pull` が repo を cwd に git を呼び、失敗時に git のエラーを伝播する
-- [ ] `gistan init` / `gistan sync` が案内メッセージ付きエラー (exit code 非 0) になる
-- [ ] `deno fmt` / `deno lint` / `deno test` 全通過
+- [x] `root path` が config の repo path を出力する
+- [x] `root commit`: 変更あり → add -A + commit (-m 指定文言 / 無指定は自動文言)、変更なし → nothing to commit で exit 0
+- [x] `root push` / `root pull` が repo を cwd に git を呼び、失敗時に git のエラーを伝播する
+- [x] `gistan init` / `gistan sync` が案内メッセージ付きエラー (exit code 非 0) になる
+- [x] `deno fmt` / `deno lint` / `deno test` 全通過
 
 ## notes
 

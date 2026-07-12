@@ -3,6 +3,8 @@
 260708 root status / status 出力削減 / search 完全糖衣 / search 視認性
 ===
 
+> **Status: 完了 (2026-07-12, followup 4 まで実機フィードバック反映済み)**。最終仕様は [SPEC-0001](./SPEC-0001-gistan-cli.md) を正とする。
+
 ## asis
 
 - `gistan root` に git status 相当がなく、repo の変更状態を見るには cd してから git を叩くしかない
@@ -27,26 +29,26 @@
 
 ## todo
 
-- [ ] root.ts: `status` subcommand 追加 (`runPushPull` を汎用 passthrough として流用 or 改名)。USAGE 文字列更新
-- [ ] main.ts: `COMMAND_DESCRIPTIONS.root` に status を追記
-- [ ] status.ts: 既定 filter (`in-sync` / `remote-unknown` を隠す) + `--all` flag。summary 行は維持。dirname filter は常に表示
-- [ ] main.ts: dispatch 再構成。第一引数を parseArgs より前に判定し、未知の第一引数は argv 全体ごと search へ fallback する。`s` → `search` alias 追加 (usage にも記載)
-- [ ] search.ts: LIST_CMD / GREP_CMD / RELOAD_CMD を「filename match 連結 + `sed 's|^gists/||'` による prefix 除去」に更新。選択結果の path 復元に `toRelPath` を使う (`-p` 出力と openEditor 双方)
-- [ ] search.ts: preview 改善 (match 行へ位置合わせ + rg --passthru による match 行 highlight + ctrl-u / ctrl-d scroll bind)。filename hit (line 番号なし) でも preview が壊れないこと
-- [ ] test 更新: root_test.ts / main_test.ts / status_test.ts / search_test.ts
-- [ ] docs 更新: SPEC-0001 (Commands 節: `root status`, `status [--all]`, search 挙動, 糖衣仕様と `s` alias) / README (該当例)
+- [x] root.ts: `status` subcommand 追加 (`runPushPull` を汎用 passthrough として流用 or 改名)。USAGE 文字列更新
+- [x] main.ts: `COMMAND_DESCRIPTIONS.root` に status を追記
+- [x] status.ts: 既定 filter (`in-sync` / `remote-unknown` を隠す) + `--all` flag。summary 行は維持。dirname filter は常に表示
+- [x] main.ts: dispatch 再構成。第一引数を parseArgs より前に判定し、未知の第一引数は argv 全体ごと search へ fallback する。`s` → `search` alias 追加 (usage にも記載)
+- [x] search.ts: LIST_CMD / GREP_CMD / RELOAD_CMD を「filename match 連結 + `sed 's|^gists/||'` による prefix 除去」に更新。選択結果の path 復元に `toRelPath` を使う (`-p` 出力と openEditor 双方)
+- [x] search.ts: preview 改善 (match 行へ位置合わせ + rg --passthru による match 行 highlight + ctrl-u / ctrl-d scroll bind)。filename hit (line 番号なし) でも preview が壊れないこと
+- [x] test 更新: root_test.ts / main_test.ts / status_test.ts / search_test.ts
+- [x] docs 更新: SPEC-0001 (Commands 節: `root status`, `status [--all]`, search 挙動, 糖衣仕様と `s` alias) / README (該当例)
 
 ## testcases
 
-- [ ] `gistan root status` が repo cwd で git status を実行し、exit code / stdout / stderr をそのまま伝播する
-- [ ] `gistan status`: 全件 in-sync のとき list 部が空で summary のみ出る。drift 混在時は drift 行のみ + summary
-- [ ] `gistan status --all`: 従来同様全件出る
-- [ ] `gistan status <dirname>`: in-sync でもその item が出る
-- [ ] `gistan -p foo` が search に `-p foo` として届く (runner mock で fzf 呼び出し引数を検証)
-- [ ] `gistan s foo` = `gistan search foo`。`gistan --version` / `gistan -h` / `gistan init` (removed hint) は従来挙動
-- [ ] `gistan 未知語` が search fallback する (usage エラーにならない)
-- [ ] search: fzf に渡る reload command が `gists/` prefix 除去と filename match 連結を含む。選択行 `foo/bar.md:12:...` と `stars/x/y.md` の両方で編集対象 path が正しく復元される
-- [ ] `deno task check` / `deno task test` が通る
+- [x] `gistan root status` が repo cwd で git status を実行し、exit code / stdout / stderr をそのまま伝播する
+- [x] `gistan status`: 全件 in-sync のとき list 部が空で summary のみ出る。drift 混在時は drift 行のみ + summary
+- [x] `gistan status --all`: 従来同様全件出る
+- [x] `gistan status <dirname>`: in-sync でもその item が出る
+- [x] `gistan -p foo` が search に `-p foo` として届く (runner mock で fzf 呼び出し引数を検証)
+- [x] `gistan s foo` = `gistan search foo`。`gistan --version` / `gistan -h` / `gistan init` (removed hint) は従来挙動
+- [x] `gistan 未知語` が search fallback する (usage エラーにならない)
+- [x] search: fzf に渡る reload command が `gists/` prefix 除去と filename match 連結を含む。選択行 `foo/bar.md:12:...` と `stars/x/y.md` の両方で編集対象 path が正しく復元される
+- [x] `deno task check` / `deno task test` が通る
 
 ## followup (実機フィードバック 1 回目)
 

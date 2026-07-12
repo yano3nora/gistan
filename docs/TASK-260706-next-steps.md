@@ -3,6 +3,9 @@
 260706 next steps
 ===
 
+> **Status: クローズ (2026-07-12)**。ここに書いた 1〜3 (実データ検証 / 本運用開始 / star) は完了。
+> 現在の再開ポイントは [TASK-260712-wrap-up-and-next](./TASK-260712-wrap-up-and-next.md) を参照。
+
 ## asis
 
 v1 (init / import / search / publish / status) + v2 (pull / doctor / new / edit / list /

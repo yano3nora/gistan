@@ -3,6 +3,9 @@
 260706 gistan v3 star mirror
 ===
 
+> **Status: 実装完了 (2026-07-12, v0.5.0)**。残るのは下記の未チェック 3 件 (いずれも人間による実機確認のみ)。
+> 確認が済んだらチェックを入れて本 TASK をクローズする。
+
 ## asis
 
 他人の gist を local で検索・参照する手段がない。search / list / edit は `stars/` を

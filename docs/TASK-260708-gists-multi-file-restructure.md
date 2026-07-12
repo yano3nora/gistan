@@ -3,6 +3,8 @@
 260708 multi-file gist 全面対応 (gists/ 構造 + index v2)
 ===
 
+> **Status: 完了 (2026-07-08, v0.2 系)**。決定は [ADR-0002](./ADR-0002-one-directory-one-gist.md)、最終仕様は [SPEC-0001](./SPEC-0001-gistan-cli.md) を正とする。
+
 ## asis
 
 - `snippets/` はフラットなファイル置き場で、single-file gist のみ first-class (1 file = 1 gist = 1 index エントリ)
@@ -116,29 +118,29 @@ gistan list [--published|--local|--stars]
 
 ## todo
 
-- [ ] `src/core/state.ts`: schema v2 型定義・load (v1 検出エラー含む)・save
-- [ ] `src/core/reconcile.ts`: dir + file 二段照合へ書き換え
-- [ ] `src/core/gh.ts`: multi-file 対応 (create / update の files map、update 時のファイル削除 = null、description 設定・クリア)
-- [ ] `src/core/description.ts`: tags 解釈 (`parseDescription`) を削除、slugify は dirname 生成用に維持
-- [ ] `src/core/snippets.ts`: `gists/` スキャン (dir 単位 + 裸ファイル・ネスト検出)、`.description.txt` の hash 計算
-- [ ] `src/commands/`: new / search / edit / rm / publish / unpublish / pull / status / import / list を上記仕様へ書き換え
-- [ ] `src/commands/doctor.ts` を削除し、修復ロジックを `status --fix` へ移植
-- [ ] `docs/SPEC-0001-gistan-cli.md` 全面改訂: Terms (snippet → gist/dir)、Behavior、コマンド一覧、レイアウト、index スキーマ、Invariants (「byte 一致」の例外として `.description.txt` を予約名として明記 / doctor → status --fix)、Open Questions の multi-file 項を解決済みに
-- [ ] `docs/ADR-0002-one-directory-one-gist.md` 新規作成: 本再設計 (dir = gist 準拠 / tags 廃止 / .description.txt / index は published のみ) の決定と背景を記録
-- [ ] `AGENTS.md` 更新: doctor 記述 → status --fix、snippets/ 用語、tags 廃止
-- [ ] `README.md` 更新: 予約名 `.description.txt` の明示を含む
+- [x] `src/core/state.ts`: schema v2 型定義・load (v1 検出エラー含む)・save
+- [x] `src/core/reconcile.ts`: dir + file 二段照合へ書き換え
+- [x] `src/core/gh.ts`: multi-file 対応 (create / update の files map、update 時のファイル削除 = null、description 設定・クリア)
+- [x] `src/core/description.ts`: tags 解釈 (`parseDescription`) を削除、slugify は dirname 生成用に維持
+- [x] `src/core/snippets.ts`: `gists/` スキャン (dir 単位 + 裸ファイル・ネスト検出)、`.description.txt` の hash 計算
+- [x] `src/commands/`: new / search / edit / rm / publish / unpublish / pull / status / import / list を上記仕様へ書き換え
+- [x] `src/commands/doctor.ts` を削除し、修復ロジックを `status --fix` へ移植
+- [x] `docs/SPEC-0001-gistan-cli.md` 全面改訂: Terms (snippet → gist/dir)、Behavior、コマンド一覧、レイアウト、index スキーマ、Invariants (「byte 一致」の例外として `.description.txt` を予約名として明記 / doctor → status --fix)、Open Questions の multi-file 項を解決済みに
+- [x] `docs/ADR-0002-one-directory-one-gist.md` 新規作成: 本再設計 (dir = gist 準拠 / tags 廃止 / .description.txt / index は published のみ) の決定と背景を記録
+- [x] `AGENTS.md` 更新: doctor 記述 → status --fix、snippets/ 用語、tags 廃止
+- [x] `README.md` 更新: 予約名 `.description.txt` の明示を含む
 
 ## testcases
 
-- [ ] reconcile v2: unpublished / dir-missing / remote-deleted / local-drift (編集・追加・削除) / remote-drift / conflict / description drift の各判定 unit test
-- [ ] state v2: load / save round-trip、v1 state.json 読み込みで案内付きエラー
-- [ ] publish: create 時 `.description.txt` が gist ファイルに**含まれない**こと (最重要)。update 時に差分ファイルのみ・削除ファイル null・description 反映のペイロード検証
-- [ ] publish: description ファイル削除 → remote description クリア
-- [ ] rm: 最後の 1 ファイルで gist ごと削除の確認が出ること
-- [ ] import: multi-file gist が dir + index エントリ + .description.txt 付きで取り込まれ、再 import で skip されること。dirname 衝突 suffix。同名 dir 既存時の override 確認。`.description.txt` を含む gist の warn + skip
-- [ ] import → publish の round-trip で二重 gist が生成されないこと (dir 単位)
-- [ ] status: offline 時に API を呼ばないこと。--fix で旧 doctor 相当の修復が動くこと
-- [ ] `deno fmt` / `deno lint` / `deno test` 全通過
+- [x] reconcile v2: unpublished / dir-missing / remote-deleted / local-drift (編集・追加・削除) / remote-drift / conflict / description drift の各判定 unit test
+- [x] state v2: load / save round-trip、v1 state.json 読み込みで案内付きエラー
+- [x] publish: create 時 `.description.txt` が gist ファイルに**含まれない**こと (最重要)。update 時に差分ファイルのみ・削除ファイル null・description 反映のペイロード検証
+- [x] publish: description ファイル削除 → remote description クリア
+- [x] rm: 最後の 1 ファイルで gist ごと削除の確認が出ること
+- [x] import: multi-file gist が dir + index エントリ + .description.txt 付きで取り込まれ、再 import で skip されること。dirname 衝突 suffix。同名 dir 既存時の override 確認。`.description.txt` を含む gist の warn + skip
+- [x] import → publish の round-trip で二重 gist が生成されないこと (dir 単位)
+- [x] status: offline 時に API を呼ばないこと。--fix で旧 doctor 相当の修復が動くこと
+- [x] `deno fmt` / `deno lint` / `deno test` 全通過
 
 ## notes
 

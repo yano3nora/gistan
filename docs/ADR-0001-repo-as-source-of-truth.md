@@ -1,6 +1,6 @@
 # ADR-0001: markdown repo を Source of Truth とし gist へは明示的コマンドでのみ同期する
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-05
 
 ## Context
@@ -35,12 +35,12 @@
 ### 3. repo を隠さない。CLI は門番ではなく糖衣
 
 - `cd` して直接編集・削除・mv しても壊れないことを保証する (pass / chezmoi と同じ思想)
-- 整合性は事前防止ではなく `doctor` による事後検出・修復で担保する
+- 整合性は事前防止ではなく事後検出・修復で担保する (当初 `doctor`。ADR-0002 で `status --fix` に統合)
 
 ### 4. メタデータは frontmatter ではなく repo 内 index (`.gistan/`) に置く
 
 - 非 markdown ファイル (`.tsx` 等) に frontmatter は書けず、markdown でも frontmatter が publish 内容に露出する
-- ファイル内容と gist 内容の byte 一致を守るため、gist ID・tags・可視性・同期時点の hash は index に隔離する
+- ファイル内容と gist 内容の byte 一致を守るため、gist ID・可視性・同期時点の hash は index に隔離する (tags は当初 index に置く想定だったが ADR-0002 で廃止)
 
 ### 5. 認証・GitHub API は gh CLI に相乗りする
 
@@ -63,7 +63,7 @@
 - **gist を SoT とする gist client 自作**: gist の検索・構造の貧弱さと戦い続けることになり、gistpad と同じ泥沼。API rate limit も常に敵になる
 - **双方向自動同期**: gistpad の失敗の再現。conflict 解決・部分同期は個人開発で品質を維持できない
 - **VSCode 拡張として作る**: エディタ依存こそが解決したい課題なので本末転倒
-- **gh gist + shell 関数で済ませる**: 8 割は代替可能だが、753 件の横断検索・冪等な publish・drift 検出 (doctor)・規約の強制力 (new) が賄えない。この差分が自作の存在理由
+- **gh gist + shell 関数で済ませる**: 8 割は代替可能だが、753 件の横断検索・冪等な publish・drift 検出 (status --fix)・規約の強制力 (new) が賄えない。この差分が自作の存在理由
 - **汎用メモツール化 (Obsidian / Evernote 代替)**: Non-Goal。gist という「不完全だが消えないサービス」の最大活用に特化し、ニッチに刺す
 - **メタデータを frontmatter に置く**: 非 markdown 非対応・publish 内容への露出のため不採用 (Decision 4)
 - **Rust で実装**: 性能優位が活きない glue CLI であり、subprocess 中心のコードは Rust 学習の題材としても本丸 (所有権・並行性) に触れない。初速低下に見合わず不採用
@@ -81,8 +81,8 @@
 ### リスク・コスト
 
 - gist の可視性は作成後 API で変更不可 (update エンドポイントに `public` フィールドがない)。可視性変更・再公開は delete + 再作成となり **URL が変わる**。UX 上の警告が必須
-- 手動 pull 前提のため remote 編集の取り込み忘れ (drift) が起きうる → doctor / status で検出可能にする
-- index とファイル実体の乖離 (直接 mv / rm) が起きうる → doctor が content hash で検出・再リンク
+- 手動 pull 前提のため remote 編集の取り込み忘れ (drift) が起きうる → `status --remote` で検出可能にする
+- index とファイル実体の乖離 (直接 mv / rm) が起きうる → `status --fix` が content hash で検出・修復
 - Deno runtime への依存を受け入れる。`deno compile` のバイナリは数十 MB とリッチだが、個人配布のため実害は薄い
 
 ## Migration Notes
@@ -93,12 +93,14 @@
 
 ## Open Questions
 
-- gist repo の default 配置・名前 (`~/notes` 相当をどこにするか)
-- multi-file gist の first-class サポート範囲 (v1 は import 時の保持のみ)
-- index (`.gistan/state.json`) の複数マシン間 merge conflict が実害になった場合の分割 (per-file sidecar 化)
+- index (`.gistan/state.json`) の複数マシン間 merge conflict が実害になった場合の分割 (per-gist sidecar 化)
+- ~~gist repo の default 配置・名前~~ → 解決: default は設けず `root init [dir]` で明示指定する
+- ~~multi-file gist の first-class サポート範囲~~ → 解決: [ADR-0002](./ADR-0002-one-directory-one-gist.md) の 1 directory = 1 gist で single / multi の区別自体を消した
 
 ## Progress
 
 - 2026-07-05: 壁打ちを経て初版作成
 - 2026-07-05: 実装言語を Rust から Deno + TypeScript に変更 (性能優位が活きず、学習題材としても不適と判断)
 - 2026-07-05: 設計レビューの懸念 (v1 スコープ縮小・照合エンジン単一化・star mirror の cache 化) を SPEC-0001 に反映
+- 2026-07-08: ADR-0002 で 1 directory = 1 gist へ再設計 (tags 廃止 / doctor → `status --fix` 統合 / index v2)。gitleaks 依存も削除 (Migration Notes 参照)
+- 2026-07-12: v0.5.0 で star mirror (Decision 6) まで実装完了し、全 Decision が実装に反映されたため Status を Accepted に変更

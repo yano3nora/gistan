@@ -3,6 +3,10 @@
 260705 gistan v1 (MVP) 実装
 ===
 
+> **Status: クローズ (2026-07-12)**。v1 実装は完了。本文の `snippets/` / tags / gitleaks / doctor は
+> [ADR-0002](./ADR-0002-one-directory-one-gist.md) の再設計で廃止されており、記録としてのみ残す。
+> 未チェックの「実データ検証」は v2 再設計後の実運用 (753 gists import + 日常利用) で事実上完了した。
+
 ## asis
 
 設計ドキュメントのみ存在し、コードは未着手。

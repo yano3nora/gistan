@@ -127,6 +127,45 @@ Important rules:
 - Do not commit, push, create releases, or publish packages from the agent; humans decide external
   publication.
 
+### Structure
+
+Where to look when touching a feature. The flow is always `src/main.ts` (dispatch) →
+`src/commands/*` (one file per subcommand, CLI concerns only) → `src/core/*` (logic shared across
+commands, no CLI concerns). Every module has a sibling `*_test.ts`.
+
+```text
+src/
+├ main.ts                 # entrypoint: dispatch, --help/--version, search sugar fallback,
+│                         # removed-command hints, hidden renderer routing
+├ commands/
+│ ├ types.ts              # CommandContext (stdout/runner/confirm/editor) — every command's interface
+│ ├ shared.ts             # config guard, fzf helpers, browse (ctrl-o) / preview / viewer binds
+│ ├ new.ts / edit.ts / list.ts / rm.ts     # local file operations (fzf pick + $EDITOR)
+│ ├ search.ts             # document-unit search: fzf --disabled + self-reload UI
+│ ├ search_render.ts      #   hidden `__search-render`: query parse, AND/exclude, excerpt, colors
+│ ├ preview_render.ts     #   hidden `__preview`: bat highlight + match emphasis for fzf previews
+│ ├ grep.ts               # line-level regex search (rg reload)
+│ ├ publish.ts / unpublish.ts / pull.ts / status.ts   # sync surface, all built on core/reconcile
+│ ├ import.ts             # bulk import of existing gists
+│ ├ star.ts               # star mirror: sync / add
+│ ├ root.ts               # repo git helpers: init / path / commit / push / pull / status
+│ ├ init.ts               # implementation behind `root init` (repo scaffold + config)
+│ └ test_helpers.ts
+├ core/
+│ ├ reconcile.ts          # THE drift engine — status/pull/publish must all judge through here
+│ ├ state.ts              # index v2 (.gistan/state.json) load/save, v1 detection
+│ ├ snippets.ts           # gists/ scanning (bare files / nesting), content hash, .description.txt
+│ ├ stars.ts              # stars/ mirror writes + .gistan/cache/stars.json
+│ ├ gh.ts                 # all GitHub API access, as `gh api` subprocess wrappers
+│ ├ config.ts             # ~/.config/gistan/config.toml
+│ ├ deps.ts               # external CLI presence checks (gh/git/rg/fzf)
+│ ├ proc.ts               # Runner abstraction over subprocesses (swapped out in tests)
+│ └ description.ts        # slugify for import dirnames
+└ testing.ts              # in-memory CommandContext for unit tests
+scripts/release.ts        # release:prepare / release:publish (publish is human-only)
+docs/                     # ADR (decisions) / SPEC (current behavior) / TASK (work logs)
+```
+
 ### Test dev binary
 ```sh
 mise exec -- deno task compile
