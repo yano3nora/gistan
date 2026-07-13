@@ -47,6 +47,8 @@
 - **Testing**: 完了前に `deno fmt` / `deno lint` / `deno test` または `deno task check` /
   `deno task test` を実行する
 - **Documentation**: 技術的意思決定は ADR、仕様は SPEC、作業単位は TASK に残す
+- **Backlog**: 未着手・保留・トリガー待ちのタスクは `docs/BACKLOG.md` に一元管理する。他の TASK
+  に残さずここへ追記し、着手時に pick して新 TASK を作る
 
 ## Domains
 
