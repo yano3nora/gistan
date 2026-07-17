@@ -7,7 +7,7 @@
 
 1. 次の作業を始めるときは、ここから 1 件 pick して `TASK-YYMMDD-<slug>.md` を新規作成する
    (テンプレは [TASK-YYMMDD-template](./TASK-YYMMDD-template.md))
-2. pick した項目は本ファイルから削除し、新 TASK へのリンクに差し替える
+2. pick した項目は新 TASK へのリンクに差し替え、完了したらリンクごと項目を削除する
 3. 新しい未解決事項が出たら、他の TASK に残さずここへ追記する
 4. SPEC-0001 の Open Questions と重複する項目は、決着時に SPEC 側も更新すること
 
