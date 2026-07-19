@@ -181,14 +181,15 @@ async function publish(version: string, publishAllowed: boolean): Promise<void> 
   await assertCleanTree();
   await assertTagAtHead(tag);
 
+  // goreleaser は GITHUB_TOKEN を要求する。gh の認証を使い回して token 管理を増やさない。
+  // push 後に認証失敗すると remote だけ進んだ半端な状態になるため、token は push より先に確保する
+  const token = Deno.env.get("GITHUB_TOKEN") ??
+    (await run("gh", ["auth", "token"], { quiet: true })).trim();
+
   // goreleaser は push を行わず GitHub API しか叩かないため、
   // Release が正しいコミットを指すように commit と tag を先に remote へ揃える
   await run("git", ["push", "origin", "HEAD"]);
   await run("git", ["push", "origin", tag]);
-
-  // goreleaser は GITHUB_TOKEN を要求する。gh の認証を使い回して token 管理を増やさない
-  const token = Deno.env.get("GITHUB_TOKEN") ??
-    (await run("gh", ["auth", "token"], { quiet: true })).trim();
 
   await run("goreleaser", ["release", "--clean"], {
     env: { GITHUB_TOKEN: token },
